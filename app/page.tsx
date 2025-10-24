@@ -15,6 +15,7 @@ import RequestsDashboard from "@/components/requests-dashboard"
 import BorrowScheduleComponent from "@/components/borrow-schedule"
 import ScheduleModal from "@/components/schedule-modal"
 import QRCodeGenerator from "@/components/qr-code-generator"
+import QRScanner from "@/components/qr-scanner"
 import RatingModal from "@/components/rating-modal"
 import UserProfile from "@/components/user-profile"
 import Dashboard from "@/components/dashboard"
@@ -39,9 +40,10 @@ interface BorrowSchedule {
   itemId: number
   itemTitle: string
   borrowerName: string
+  borrowerQRCode: string
   startDate: string
   endDate: string
-  status: "scheduled" | "active" | "overdue" | "completed"
+  status: "scheduled" | "active" | "item_given" | "overdue" | "completed"
   qrCode: string
 }
 
@@ -73,6 +75,8 @@ export default function Home() {
   const [selectedSchedule, setSelectedSchedule] = useState<BorrowSchedule | null>(null)
   const [showQRCode, setShowQRCode] = useState(false)
   const [selectedQRSchedule, setSelectedQRSchedule] = useState<BorrowSchedule | null>(null)
+  const [showQRScanner, setShowQRScanner] = useState(false)
+  const [scanType, setScanType] = useState<"handoff" | "return" | null>(null)
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingTarget, setRatingTarget] = useState<{ userName: string; itemTitle: string } | null>(null)
 
@@ -132,6 +136,7 @@ export default function Home() {
       itemId: 1,
       itemTitle: "Laptop Stand",
       borrowerName: "Alex Johnson",
+      borrowerQRCode: `borrower-alex-${Date.now()}`,
       startDate: "2025-10-20",
       endDate: "2025-10-27",
       status: "active",
@@ -142,6 +147,7 @@ export default function Home() {
       itemId: 2,
       itemTitle: "Calculus Textbook",
       borrowerName: "Sarah Lee",
+      borrowerQRCode: `borrower-sarah-${Date.now()}`,
       startDate: "2025-10-15",
       endDate: "2025-10-22",
       status: "scheduled",
@@ -303,10 +309,10 @@ export default function Home() {
     },
   ]
 
-  const handleLogin = (email: string) => {
+  const handleLogin = (email: string, name: string) => {
     const isAdmin = email === "admin@g.batstate-u.edu.ph"
     setCurrentUser({
-      name: isAdmin ? "Admin" : email.split("@")[0],
+      name: isAdmin ? "Admin" : name,
       email,
       rating: isAdmin ? 5.0 : 4.7,
       itemsLent: isAdmin ? 25 : 5,
@@ -383,6 +389,7 @@ export default function Home() {
         itemId: approvedRequest.itemId,
         itemTitle: approvedRequest.itemTitle,
         borrowerName: approvedRequest.borrowerName,
+        borrowerQRCode: `borrower-${approvedRequest.borrowerName.replace(/\s+/g, "-")}-${Date.now()}`,
         startDate: data.startDate,
         endDate: data.endDate,
         status: "scheduled",
@@ -397,6 +404,47 @@ export default function Home() {
   const handleGenerateQR = (schedule: BorrowSchedule) => {
     setSelectedQRSchedule(schedule)
     setShowQRCode(true)
+  }
+
+  const handleScanQR = (schedule: BorrowSchedule, type: "handoff" | "return") => {
+    setSelectedSchedule(schedule)
+    setScanType(type)
+    setShowQRScanner(true)
+  }
+
+  const handleQRScanComplete = (scannedData: string) => {
+    if (!selectedSchedule || !scanType) return
+
+    if (scanType === "handoff") {
+      // First scan: Item handoff - change status to item_given
+      setBorrowSchedules(
+        borrowSchedules.map((sched) =>
+          sched.id === selectedSchedule.id ? { ...sched, status: "item_given" as const } : sched,
+        ),
+      )
+      alert(
+        `✓ Item handoff confirmed!\n\nBorrower: ${selectedSchedule.borrowerName}\nItem: ${selectedSchedule.itemTitle}`,
+      )
+    } else if (scanType === "return") {
+      // Second scan: Item return - change status to completed and trigger rating
+      setBorrowSchedules(
+        borrowSchedules.map((sched) =>
+          sched.id === selectedSchedule.id ? { ...sched, status: "completed" as const } : sched,
+        ),
+      )
+      alert(`✓ Item return confirmed!\n\nTransaction completed with ${selectedSchedule.borrowerName}`)
+
+      // Trigger rating modal
+      setRatingTarget({
+        userName: selectedSchedule.borrowerName,
+        itemTitle: selectedSchedule.itemTitle,
+      })
+      setShowRatingModal(true)
+    }
+
+    setShowQRScanner(false)
+    setSelectedSchedule(null)
+    setScanType(null)
   }
 
   const handleMarkScheduleComplete = (scheduleId: string) => {
@@ -463,7 +511,9 @@ export default function Home() {
               <Dashboard
                 currentUser={currentUser}
                 pendingRequests={borrowRequests.filter((r) => r.status === "pending").length}
-                activeSchedules={borrowSchedules.filter((s) => s.status === "active").length}
+                activeSchedules={
+                  borrowSchedules.filter((s) => s.status === "active" || s.status === "item_given").length
+                }
                 completedTransactions={borrowSchedules.filter((s) => s.status === "completed").length}
                 recentActivity={recentActivity}
                 onNavigate={setUserMode}
@@ -515,7 +565,7 @@ export default function Home() {
                 <BorrowScheduleComponent
                   schedules={borrowSchedules}
                   onGenerateQR={handleGenerateQR}
-                  onMarkComplete={handleMarkScheduleComplete}
+                  onScanQR={handleScanQR}
                 />
               </>
             ) : userMode === "profile" ? (
@@ -635,6 +685,23 @@ export default function Home() {
             />
           </div>
         </div>
+      )}
+
+      {showQRScanner && selectedSchedule && (
+        <QRScanner
+          onScan={handleQRScanComplete}
+          onClose={() => {
+            setShowQRScanner(false)
+            setSelectedSchedule(null)
+            setScanType(null)
+          }}
+          title={scanType === "handoff" ? "Give Item to Borrower" : "Receive Item from Borrower"}
+          description={
+            scanType === "handoff"
+              ? `Scan ${selectedSchedule.borrowerName}'s QR code to confirm item handoff`
+              : `Scan ${selectedSchedule.borrowerName}'s QR code to confirm item return`
+          }
+        />
       )}
 
       <RatingModal
