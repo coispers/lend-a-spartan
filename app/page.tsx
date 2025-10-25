@@ -6,7 +6,6 @@ import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Plus, Inbox, Calendar, User } from "lucide-react"
 import Navigation from "@/components/navigation"
-import AuthModal from "@/components/auth-modal"
 import ItemDetailModal from "@/components/item-detail-modal"
 import RequestModal from "@/components/request-modal"
 import SearchFilters from "@/components/search-filters"
@@ -19,6 +18,8 @@ import QRScanner from "@/components/qr-scanner"
 import RatingModal from "@/components/rating-modal"
 import UserProfile from "@/components/user-profile"
 import Dashboard from "@/components/dashboard"
+import SignInModal from "@/components/signin-modal"
+import RegisterModal from "@/components/register-modal"
 
 interface BorrowRequest {
   id: string
@@ -79,6 +80,8 @@ export default function Home() {
   const [scanType, setScanType] = useState<"handoff" | "return" | null>(null)
   const [showRatingModal, setShowRatingModal] = useState(false)
   const [ratingTarget, setRatingTarget] = useState<{ userName: string; itemTitle: string } | null>(null)
+  const [showSignInModal, setShowSignInModal] = useState(false)
+  const [showRegisterModal, setShowRegisterModal] = useState(false)
 
   const [userReviews, setUserReviews] = useState<UserReview[]>([
     {
@@ -323,7 +326,8 @@ export default function Home() {
       trustScore: isAdmin ? 100 : 85,
     })
     setIsAuthenticated(true)
-    setShowAuthModal(false)
+    setShowSignInModal(false)
+    setShowRegisterModal(false)
     setUserMode("dashboard")
   }
 
@@ -485,9 +489,10 @@ export default function Home() {
         isAuthenticated={isAuthenticated}
         currentUser={currentUser}
         onLogout={handleLogout}
-        onLoginClick={() => setShowAuthModal(true)}
+        onLoginClick={() => setShowSignInModal(true)}
         userMode={userMode}
         onModeChange={setUserMode}
+        setShowAuthModal={() => setShowSignInModal(true)}
       />
 
       <main className="container mx-auto px-4 py-8">
@@ -497,13 +502,18 @@ export default function Home() {
               <h1 className="text-5xl font-bold text-primary mb-4">Lend-A-Spartan</h1>
               <p className="text-xl text-muted-foreground mb-8">Share and borrow items with your BatStateU community</p>
             </div>
-            <Button
-              size="lg"
-              onClick={() => setShowAuthModal(true)}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground"
-            >
-              Sign In with BatStateU Email
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center">
+              <Button
+                size="lg"
+                onClick={() => setShowSignInModal(true)}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground"
+              >
+                Sign In
+              </Button>
+              <Button size="lg" variant="outline" onClick={() => setShowRegisterModal(true)}>
+                Register
+              </Button>
+            </div>
           </div>
         ) : (
           <>
@@ -647,7 +657,25 @@ export default function Home() {
         )}
       </main>
 
-      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} onLogin={handleLogin} />
+      <SignInModal
+        isOpen={showSignInModal}
+        onClose={() => setShowSignInModal(false)}
+        onLogin={handleLogin}
+        onSwitchToRegister={() => {
+          setShowSignInModal(false)
+          setShowRegisterModal(true)
+        }}
+      />
+
+      <RegisterModal
+        isOpen={showRegisterModal}
+        onClose={() => setShowRegisterModal(false)}
+        onRegister={handleLogin}
+        onSwitchToSignIn={() => {
+          setShowRegisterModal(false)
+          setShowSignInModal(true)
+        }}
+      />
 
       {selectedItem && (
         <ItemDetailModal
