@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -20,6 +20,7 @@ import UserProfile from "@/components/user-profile"
 import Dashboard from "@/components/dashboard"
 import SignInModal from "@/components/signin-modal"
 import RegisterModal from "@/components/register-modal"
+import { supabase } from "@/lib/supabaseclient"
 
 interface BorrowRequest {
   id: string
@@ -58,6 +59,18 @@ interface UserReview {
 }
 
 export default function Home() {
+  const [status, setStatus] = useState('Testing connection...');
+
+  useEffect(() => {
+    async function testConnection() {
+      const { data, error } = await supabase.from('pg_tables').select('*').limit(1);
+      if (error) setStatus('Connection failed: ' + error.message);
+      else setStatus('Connection successful.');
+      console.log(error?.message);
+    }
+    testConnection();
+  }, []);
+  
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [showAuthModal, setShowAuthModal] = useState(false)
@@ -505,7 +518,7 @@ export default function Home() {
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Button
                 size="lg"
-                onClick={() => setShowSignInModal(true)}
+                onClick={() => { setShowSignInModal(true); }}
                 className="bg-primary hover:bg-primary/90 text-primary-foreground"
               >
                 Sign In
