@@ -18,7 +18,7 @@ interface DashboardProps {
     date: Date
     status?: string
   }>
-  onNavigate: (mode: string) => void
+  onNavigate: (mode: "dashboard" | "browse" | "lend" | "requests" | "schedule" | "profile") => void
 }
 
 export default function Dashboard({
@@ -29,6 +29,10 @@ export default function Dashboard({
   recentActivity,
   onNavigate,
 }: DashboardProps) {
+  const displayFirstName =
+    currentUser?.firstName ||
+    (typeof currentUser?.name === "string" ? currentUser.name.split(" ")[0] : "Spartan")
+
   const getActivityIcon = (type: string) => {
     switch (type) {
       case "request":
@@ -48,7 +52,7 @@ export default function Dashboard({
     <div className="space-y-8 md:space-y-12">
       <div>
         <h1 className="text-2xl md:text-4xl font-bold text-foreground mb-1 md:mb-2">
-          Welcome back, {currentUser.name}
+          Welcome back, {displayFirstName}
         </h1>
         <p className="text-sm md:text-base text-muted-foreground">Here's your activity overview</p>
       </div>

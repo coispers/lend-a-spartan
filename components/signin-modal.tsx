@@ -1,16 +1,18 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { X, Eye, EyeOff } from "lucide-react"
+import { supabase } from "@/lib/supabaseclient"
+import type { AuthUser } from "@/types/auth"
 
 interface SignInModalProps {
   isOpen: boolean
   onClose: () => void
-  onLogin: (email: string, name: string) => void
+  onLogin: (user: AuthUser) => Promise<void> | void
   onSwitchToRegister: () => void
 }
 
@@ -21,6 +23,16 @@ export default function SignInModal({ isOpen, onClose, onLogin, onSwitchToRegist
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
 
+  useEffect(() => {
+    if (!isOpen) {
+      setEmail("")
+      setPassword("")
+      setShowPassword(false)
+      setError("")
+      setLoading(false)
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const isPasswordValid = (pwd: string) => {
@@ -29,10 +41,6 @@ export default function SignInModal({ isOpen, onClose, onLogin, onSwitchToRegist
 
   const isEmailValid = (emailStr: string) => {
     return emailStr.endsWith("@g.batstate-u.edu.ph")
-  }
-
-  const emailExists = (emailStr: string) => {
-    return emailStr === "admin@g.batstate-u.edu.ph"
   }
 
   const handleLogin = async () => {
@@ -57,24 +65,85 @@ export default function SignInModal({ isOpen, onClose, onLogin, onSwitchToRegist
       return
     }
 
-    if (email === "admin@g.batstate-u.edu.ph" && password === "admin123") {
-      onLogin(email, "Admin")
-      setEmail("")
-      setPassword("")
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (signInError) {
+      setError(signInError.message)
       setLoading(false)
       return
     }
 
-    if (!emailExists(email)) {
-      setError("Email not found. Please register first or check your email.")
+    if (!data.user) {
+      setError("Login failed. Please try again.")
       setLoading(false)
       return
     }
 
-    setTimeout(() => {
-      setError("Invalid email or password")
+    const user = data.user
+
+    const { data: profileData, error: profileError } = await supabase
+      .from("profiles")
+      .select("first_name, middle_name, last_name")
+      .eq("id", user.id)
+      .maybeSingle()
+
+    if (profileError && profileError.code !== "PGRST116") {
+      setError(`Unable to load your profile: ${profileError.message}`)
       setLoading(false)
-    }, 500)
+      return
+    }
+
+    const metadata = user.user_metadata ?? {}
+
+    const metadataFirst = typeof metadata.first_name === "string" ? metadata.first_name.trim() : undefined
+    const metadataMiddle = typeof metadata.middle_name === "string" ? metadata.middle_name.trim() : undefined
+    const metadataLast = typeof metadata.last_name === "string" ? metadata.last_name.trim() : undefined
+    const metadataFull = typeof metadata.full_name === "string" ? metadata.full_name.trim() : undefined
+
+  const profileFirst = profileData?.first_name?.trim()
+  const profileMiddle = profileData?.middle_name?.trim() ?? undefined
+  const profileLast = profileData?.last_name?.trim()
+
+    const defaultHandle = user.email?.split("@")[0] ?? "Spartan"
+
+  const profileFullFromParts = [profileFirst, profileMiddle, profileLast].filter(Boolean).join(" ")
+
+  const derivedFullFromProfile = metadataFull || (profileFullFromParts.length > 0 ? profileFullFromParts : undefined)
+
+    let derivedFirst = profileFirst || metadataFirst
+    let derivedMiddle = profileMiddle || metadataMiddle
+    let derivedLast = profileLast || metadataLast
+
+    if ((!derivedFirst || !derivedLast) && derivedFullFromProfile) {
+      const nameParts = derivedFullFromProfile.split(" ").filter(Boolean)
+      if (!derivedFirst && nameParts.length > 0) derivedFirst = nameParts[0]
+      if (!derivedLast && nameParts.length > 1) derivedLast = nameParts[nameParts.length - 1]
+      if (!derivedMiddle && nameParts.length > 2)
+        derivedMiddle = nameParts.slice(1, nameParts.length - 1).join(" ")
+    }
+
+    if (!derivedFirst) derivedFirst = defaultHandle
+    if (!derivedLast) derivedLast = "User"
+
+    const resolvedFullName =
+      derivedFullFromProfile || [derivedFirst, derivedMiddle, derivedLast].filter(Boolean).join(" ")
+
+    await onLogin({
+      id: user.id,
+      email: user.email ?? email,
+      firstName: derivedFirst,
+      middleName: derivedMiddle || null,
+      lastName: derivedLast,
+      fullName: resolvedFullName,
+      createdAt: user.created_at,
+    })
+
+    setEmail("")
+    setPassword("")
+    setLoading(false)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -107,7 +176,7 @@ export default function SignInModal({ isOpen, onClose, onLogin, onSwitchToRegist
             <label className="block text-sm font-medium mb-2">BatStateU Email</label>
             <Input
               type="email"
-              placeholder="your.name@g.batstate-u.edu.ph"
+              placeholder="sr-code@g.batstate-u.edu.ph"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyPress={handleKeyPress}

@@ -1,28 +1,49 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { X, Eye, EyeOff } from "lucide-react"
+import { supabase } from "@/lib/supabaseclient"
+import type { AuthUser } from "@/types/auth"
 
 interface RegisterModalProps {
   isOpen: boolean
   onClose: () => void
-  onRegister: (email: string, name: string) => void
+  onRegister: (user: AuthUser) => Promise<void> | void
   onSwitchToSignIn: () => void
 }
 
 export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToSignIn }: RegisterModalProps) {
-  const [fullName, setFullName] = useState("")
+  const [firstName, setFirstName] = useState("")
+  const [middleName, setMiddleName] = useState("")
+  const [lastName, setLastName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
   const [error, setError] = useState("")
+  const [successMessage, setSuccessMessage] = useState("")
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) {
+      setFirstName("")
+      setMiddleName("")
+      setLastName("")
+      setEmail("")
+      setPassword("")
+      setConfirmPassword("")
+      setShowPassword(false)
+      setShowConfirmPassword(false)
+      setError("")
+      setSuccessMessage("")
+      setLoading(false)
+    }
+  }, [isOpen])
 
   if (!isOpen) return null
 
@@ -34,16 +55,13 @@ export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToS
     return emailStr.endsWith("@g.batstate-u.edu.ph")
   }
 
-  const emailExists = (emailStr: string) => {
-    return emailStr === "admin@g.batstate-u.edu.ph"
-  }
-
   const handleRegister = async () => {
     setError("")
+    setSuccessMessage("")
     setLoading(true)
 
-    if (!fullName || !email || !password || !confirmPassword) {
-      setError("Please fill in all fields")
+    if (!firstName || !lastName || !email || !password || !confirmPassword) {
+      setError("Please fill in all required fields")
       setLoading(false)
       return
     }
@@ -66,26 +84,108 @@ export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToS
       return
     }
 
-    if (fullName.length < 2) {
-      setError("Please enter a valid name")
+    if (firstName.trim().length < 2 || lastName.trim().length < 2) {
+      setError("Please enter a valid first and last name")
       setLoading(false)
       return
     }
 
-    if (emailExists(email)) {
-      setError("This email is already registered")
+    const trimmedFirstName = firstName.trim()
+    const trimmedMiddleName = middleName.trim()
+    const trimmedLastName = lastName.trim()
+  const fullName = [trimmedFirstName, trimmedMiddleName, trimmedLastName].filter(Boolean).join(" ")
+
+    const redirectUrl =
+      typeof window !== "undefined" ? `${window.location.origin}/auth/callback` : undefined
+
+    const { data, error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          first_name: trimmedFirstName,
+          middle_name: trimmedMiddleName || null,
+          last_name: trimmedLastName,
+          full_name: fullName,
+        },
+        emailRedirectTo: redirectUrl,
+      },
+    })
+
+    if (signUpError) {
+      setError(signUpError.message)
       setLoading(false)
       return
     }
 
-    setTimeout(() => {
-      onRegister(email, fullName)
+    if (!data.user) {
+      setError("Registration failed. Please try again.")
+      setLoading(false)
+      return
+    }
+
+    if ((data.user.identities?.length ?? 0) === 0) {
+      setError("This email is already registered. Please sign in instead.")
+      setLoading(false)
+      return
+    }
+
+    if (data.session && data.user) {
+      const profilePayload = {
+        id: data.user.id,
+        email: data.user.email ?? email,
+        first_name: trimmedFirstName,
+        middle_name: trimmedMiddleName || null,
+        last_name: trimmedLastName,
+      }
+
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .upsert(profilePayload, { onConflict: "id" })
+
+      let finalProfileError = profileError
+
+      if (profileError?.code === "42703") {
+        const { error: fallbackError } = await supabase
+          .from("profiles")
+          .upsert(
+            {
+              id: profilePayload.id,
+              email: profilePayload.email,
+            },
+            { onConflict: "id" }
+          )
+
+        finalProfileError = fallbackError
+      }
+
+      if (finalProfileError) {
+        setError(`Account created but profile could not be saved: ${finalProfileError.message}`)
+        setLoading(false)
+        return
+      }
+
+      await onRegister({
+        id: data.user.id,
+        email: data.user.email ?? email,
+        firstName: trimmedFirstName,
+        middleName: trimmedMiddleName || null,
+        lastName: trimmedLastName,
+        fullName,
+        createdAt: data.user.created_at,
+      })
+
+      setFirstName("")
+      setMiddleName("")
+      setLastName("")
       setEmail("")
       setPassword("")
       setConfirmPassword("")
-      setFullName("")
-      setLoading(false)
-    }, 500)
+    } else {
+      setSuccessMessage("Registration successful! Please check your email to confirm your account before signing in.")
+    }
+
+    setLoading(false)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -113,14 +213,46 @@ export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToS
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">{error}</div>
         )}
 
+        {successMessage && (
+          <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-md text-sm text-green-700">
+            {successMessage}
+          </div>
+        )}
+
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2">Full Name</label>
+            <label className="block text-sm font-medium mb-2">First Name</label>
             <Input
               type="text"
-              placeholder="Juan Dela Cruz"
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Juan"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              onKeyPress={handleKeyPress}
+              disabled={loading}
+              className="border border-border"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Middle Name (optional)</label>
+            <Input
+              type="text"
+              placeholder=""
+              value={middleName}
+              onChange={(e) => setMiddleName(e.target.value)}
+              onKeyPress={handleKeyPress}
+              disabled={loading}
+              className="border border-border"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">Last Name</label>
+            <Input
+              type="text"
+              placeholder="Dela Cruz"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
               onKeyPress={handleKeyPress}
               disabled={loading}
               className="border border-border"
@@ -131,7 +263,7 @@ export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToS
             <label className="block text-sm font-medium mb-2">BatStateU Email</label>
             <Input
               type="email"
-              placeholder="your.name@g.batstate-u.edu.ph"
+              placeholder="sr-code@g.batstate-u.edu.ph"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               onKeyPress={handleKeyPress}
