@@ -21,6 +21,7 @@ import Dashboard from "@/components/dashboard"
 import SignInModal from "@/components/signin-modal"
 import RegisterModal from "@/components/register-modal"
 import { supabase } from "@/lib/supabaseclient"
+import type { AuthUser } from "@/types/auth"
 
 interface BorrowRequest {
   id: string
@@ -325,18 +326,20 @@ export default function Home() {
     },
   ]
 
-  const handleLogin = (email: string, name: string) => {
-    const isAdmin = email === "admin@g.batstate-u.edu.ph"
+  const handleLogin = (user: AuthUser) => {
     setCurrentUser({
-      name: isAdmin ? "Admin" : name,
-      email,
-      rating: isAdmin ? 5.0 : 4.7,
-      itemsLent: isAdmin ? 25 : 5,
-      itemsBorrowed: isAdmin ? 15 : 8,
-      joinDate: isAdmin
-        ? new Date(Date.now() - 365 * 24 * 60 * 60 * 1000)
-        : new Date(Date.now() - 90 * 24 * 60 * 60 * 1000),
-      trustScore: isAdmin ? 100 : 85,
+      id: user.id,
+      firstName: user.firstName,
+      middleName: user.middleName,
+      lastName: user.lastName,
+      fullName: user.fullName,
+      name: user.fullName || user.email,
+      email: user.email,
+      rating: 5.0,
+      itemsLent: 0,
+      itemsBorrowed: 0,
+      joinDate: user.createdAt ? new Date(user.createdAt) : new Date(),
+      trustScore: 85,
     })
     setIsAuthenticated(true)
     setShowSignInModal(false)
@@ -345,6 +348,7 @@ export default function Home() {
   }
 
   const handleLogout = () => {
+    supabase.auth.signOut().catch((err) => console.error("Failed to sign out", err))
     setIsAuthenticated(false)
     setCurrentUser(null)
     setUserMode("dashboard")
@@ -505,7 +509,6 @@ export default function Home() {
         onLoginClick={() => setShowSignInModal(true)}
         userMode={userMode}
         onModeChange={setUserMode}
-        setShowAuthModal={() => setShowSignInModal(true)}
       />
 
       <main className="container mx-auto px-4 py-8">
