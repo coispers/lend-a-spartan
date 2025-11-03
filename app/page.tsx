@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -30,12 +30,16 @@ interface BorrowRequest {
   itemImage: string | null
   borrowerName: string
   borrowerRating: number
+  borrowerId: string
+  borrowerEmail: string
   requestDate: Date
   preferredDate: string
   message: string
   status: "pending" | "approved" | "rejected" | "completed"
+  ownerId: string | null
   lenderName: string
-  lenderEmail: string
+  lenderEmail: string | null
+  decisionMessage?: string | null
 }
 
 interface BorrowSchedule {
@@ -63,6 +67,7 @@ interface MarketplaceItem {
     name: string
     rating: number
     reviews: number
+    email?: string | null
   }
   availability: string
   deposit: boolean
@@ -92,22 +97,18 @@ interface UserReview {
   itemTitle: string
 }
 
-export default function Home() {
-  const [status, setStatus] = useState('Testing connection...');
+type ActivityEntry = {
+  id: string
+  type: "request" | "approval" | "completion" | "rating"
+  title: string
+  description: string
+  date: Date
+  status?: string
+}
 
-  useEffect(() => {
-    async function testConnection() {
-      const { data, error } = await supabase.from('pg_tables').select('*').limit(1);
-      if (error) setStatus('Connection failed: ' + error.message);
-      else setStatus('Connection successful.');
-      console.log(error?.message);
-    }
-    testConnection();
-  }, []);
-  
+export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
-  const [showAuthModal, setShowAuthModal] = useState(false)
   const [showItemDetail, setShowItemDetail] = useState(false)
   const [selectedItem, setSelectedItem] = useState<MarketplaceItem | null>(null)
   const [showRequestModal, setShowRequestModal] = useState(false)
@@ -131,6 +132,10 @@ export default function Home() {
   const [ratingTarget, setRatingTarget] = useState<{ userName: string; itemTitle: string } | null>(null)
   const [showSignInModal, setShowSignInModal] = useState(false)
   const [showRegisterModal, setShowRegisterModal] = useState(false)
+  const [requestsView, setRequestsView] = useState<"borrower" | "lender">("borrower")
+  const [requestError, setRequestError] = useState<string | null>(null)
+  const [lenderNotification, setLenderNotification] = useState<string | null>(null)
+  const previousRequestIdsRef = useRef<Set<string>>(new Set())
 
   const [userReviews, setUserReviews] = useState<UserReview[]>([
     {
@@ -151,36 +156,7 @@ export default function Home() {
     },
   ])
 
-  const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([
-    {
-      id: "req-1",
-      itemId: "1",
-      itemTitle: "Laptop Stand",
-      itemImage: "/laptop-stand.png",
-      borrowerName: "Alex Johnson",
-      borrowerRating: 4.6,
-      requestDate: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      preferredDate: "2025-10-25",
-      message: "Need this for my project work",
-      status: "pending",
-      lenderName: "Juan Dela Cruz",
-      lenderEmail: "juan@batstateU.edu",
-    },
-    {
-      id: "req-2",
-      itemId: "2",
-      itemTitle: "Calculus Textbook",
-      itemImage: "/calculus-textbook.png",
-      borrowerName: "Sarah Lee",
-      borrowerRating: 4.8,
-      requestDate: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-      preferredDate: "2025-10-20",
-      message: "For exam preparation",
-      status: "approved",
-      lenderName: "Maria Santos",
-      lenderEmail: "maria@batstateU.edu",
-    },
-  ])
+  const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([])
 
   const [borrowSchedules, setBorrowSchedules] = useState<BorrowSchedule[]>(() => {
     const base = Date.now()
@@ -318,6 +294,7 @@ export default function Home() {
         name: record?.lender_name ?? record?.owner_name ?? "Community Lender",
         rating: safeNumber(record?.lender_rating, 5),
         reviews: safeNumber(record?.lender_reviews, 0),
+        email: record?.lender_email ?? record?.owner_email ?? record?.email ?? null,
       },
       availability: record?.availability ?? "Available",
       deposit: Boolean(record?.deposit ?? record?.deposit_required ?? false),
@@ -327,6 +304,99 @@ export default function Home() {
       quantity: safeNumber(record?.quantity, 1),
     }
   }, [])
+
+  const mapBorrowRequestRecord = useCallback((record: any): BorrowRequest => {
+    const safeString = (value: any) => {
+      if (value === null || value === undefined) return ""
+      return String(value)
+    }
+
+    const safeNumber = (value: any) => {
+      const parsed = Number(value)
+      return Number.isFinite(parsed) ? parsed : 0
+    }
+
+    return {
+      id: safeString(record?.id ?? record?.uuid ?? `req-${Date.now()}`),
+      itemId: safeString(record?.item_id ?? record?.itemId ?? ""),
+      itemTitle: record?.item_title ?? record?.itemTitle ?? "Borrowed Item",
+      itemImage: record?.item_image ?? record?.itemImage ?? null,
+      borrowerName: record?.borrower_name ?? record?.borrowerName ?? "Borrower",
+      borrowerRating: safeNumber(record?.borrower_rating ?? record?.borrowerRating ?? 0),
+      borrowerId: safeString(record?.borrower_id ?? record?.borrowerId ?? ""),
+      borrowerEmail: record?.borrower_email ?? record?.borrowerEmail ?? "",
+      requestDate:
+        record?.created_at
+          ? new Date(record.created_at)
+          : record?.request_date
+            ? new Date(record.request_date)
+            : new Date(),
+      preferredDate: record?.preferred_date ?? record?.preferredDate ?? "",
+      message: record?.message ?? record?.borrower_message ?? "",
+      status: (record?.status ?? "pending") as BorrowRequest["status"],
+      ownerId: record?.owner_id
+        ? safeString(record.owner_id)
+        : record?.lender_id
+          ? safeString(record.lender_id)
+          : null,
+      lenderName: record?.lender_name ?? record?.lenderName ?? "Lender",
+      lenderEmail: record?.lender_email ?? record?.lenderEmail ?? null,
+      decisionMessage: record?.decision_message ?? record?.decisionMessage ?? record?.response_message ?? null,
+    }
+  }, [])
+
+  const fetchBorrowRequests = useCallback(
+    async (userId: string) => {
+      if (!userId) {
+        setBorrowRequests([])
+        return
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("borrow_requests")
+          .select("*")
+          .or(`borrower_id.eq.${userId},owner_id.eq.${userId}`)
+          .order("created_at", { ascending: false })
+
+        if (error) {
+          console.error("Failed to load borrow requests", error)
+          setBorrowRequests([])
+          return
+        }
+
+  const mapped = (data ?? []).map(mapBorrowRequestRecord)
+  mapped.sort((a, b) => b.requestDate.getTime() - a.requestDate.getTime())
+        setBorrowRequests(mapped)
+      } catch (err) {
+        console.error("Unexpected error while loading borrow requests", err)
+        setBorrowRequests([])
+      }
+    },
+    [mapBorrowRequestRecord],
+  )
+
+  const sendLenderEmailNotification = useCallback(
+    async (payload: {
+      email: string
+      itemTitle: string
+      borrowerName: string
+      preferredDate: string
+      message: string
+    }) => {
+      try {
+        const { error } = await supabase.functions.invoke("send-lender-notification", {
+          body: payload,
+        })
+        if (error) {
+          throw error
+        }
+      } catch (error) {
+        console.error("Failed to send lender email notification", error)
+      }
+    },
+    [],
+  )
 
   const fetchItems = useCallback(async () => {
     setItemsLoading(true)
@@ -358,6 +428,101 @@ export default function Home() {
     fetchItems()
   }, [fetchItems])
 
+  useEffect(() => {
+    const userId = currentUser?.id
+    if (!userId) {
+      setBorrowRequests([])
+      return
+    }
+    void fetchBorrowRequests(userId)
+  }, [currentUser?.id, fetchBorrowRequests])
+
+  useEffect(() => {
+    const userId = currentUser?.id
+    if (!userId) {
+      return
+    }
+
+    const handleChange = (payload: any) => {
+      const eventType = payload?.eventType
+      if (eventType === "DELETE") {
+        const removedId = payload?.old?.id ?? payload?.old?.uuid
+        if (!removedId) return
+        setBorrowRequests((prev) => prev.filter((req) => req.id !== String(removedId)))
+        return
+      }
+
+      const record = payload?.new
+      if (!record) return
+      const mapped = mapBorrowRequestRecord(record)
+      setBorrowRequests((prev) => {
+        const existingIndex = prev.findIndex((req) => req.id === mapped.id)
+        if (existingIndex >= 0) {
+          const next = [...prev]
+          next[existingIndex] = mapped
+          next.sort((a, b) => b.requestDate.getTime() - a.requestDate.getTime())
+          return next
+        }
+        const next = [mapped, ...prev]
+        next.sort((a, b) => b.requestDate.getTime() - a.requestDate.getTime())
+        return next
+      })
+    }
+
+    const channel = supabase
+      .channel(`borrow-requests-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "borrow_requests", filter: `owner_id=eq.${userId}` },
+        handleChange,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "borrow_requests", filter: `borrower_id=eq.${userId}` },
+        handleChange,
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [currentUser?.id, mapBorrowRequestRecord])
+
+  useEffect(() => {
+    previousRequestIdsRef.current = new Set()
+  }, [currentUser])
+
+  useEffect(() => {
+    if (!currentUser) {
+      setLenderNotification(null)
+    }
+  }, [currentUser])
+
+  useEffect(() => {
+    if (!currentUser) {
+      previousRequestIdsRef.current = new Set()
+      return
+    }
+    const ownedRequests = borrowRequests.filter((req) => req.ownerId === currentUser.id)
+    const prevIds = previousRequestIdsRef.current
+    if (prevIds.size === 0) {
+      previousRequestIdsRef.current = new Set(borrowRequests.map((req) => req.id))
+      return
+    }
+    const newPending = ownedRequests.filter((req) => req.status === "pending" && !prevIds.has(req.id))
+    if (newPending.length > 0) {
+      const latest = newPending[0]
+      setLenderNotification(`New borrow request for ${latest.itemTitle} from ${latest.borrowerName}.`)
+    }
+    previousRequestIdsRef.current = new Set(borrowRequests.map((req) => req.id))
+  }, [borrowRequests, currentUser])
+
+  useEffect(() => {
+    if (!showRequestModal) {
+      setRequestError(null)
+    }
+  }, [showRequestModal])
+
   const filteredAndSortedItems = useMemo(() => {
     const normalizedSearch = searchQuery.trim().toLowerCase()
 
@@ -388,41 +553,100 @@ export default function Home() {
   }, [filterCondition, items, searchQuery, selectedCategory, sortBy])
 
   const isEditingListing = Boolean(editingItemId)
+  const borrowerRequestsForCurrentUser = useMemo(() => {
+    if (!currentUser) return []
+    return borrowRequests.filter((req) => req.borrowerId === currentUser.id)
+  }, [borrowRequests, currentUser])
 
-  const recentActivity = [
-    {
-      id: "act-1",
-      type: "request" as const,
-      title: "New Borrow Request",
-      description: "Alex Johnson requested to borrow Laptop Stand",
-      date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
-      status: "Pending",
-    },
-    {
-      id: "act-2",
-      type: "approval" as const,
-      title: "Request Approved",
-      description: "You approved Sarah Lee's request for Calculus Textbook",
-      date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
-      status: "Approved",
-    },
-    {
-      id: "act-3",
-      type: "completion" as const,
-      title: "Borrowing Completed",
-      description: "Laptop Stand was returned by Alex Johnson",
-      date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
-      status: "Completed",
-    },
-    {
-      id: "act-4",
-      type: "rating" as const,
-      title: "New Rating Received",
-      description: "Alex Johnson gave you a 5-star rating",
-      date: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
-      status: "5 Stars",
-    },
-  ]
+  const lenderRequestsForCurrentUser = useMemo(() => {
+    if (!currentUser) return []
+    return borrowRequests.filter((req) => req.ownerId === currentUser.id)
+  }, [borrowRequests, currentUser])
+
+  const pendingLenderRequests = useMemo(
+    () => lenderRequestsForCurrentUser.filter((req) => req.status === "pending").length,
+    [lenderRequestsForCurrentUser],
+  )
+
+  const baseRecentActivity = useMemo<ActivityEntry[]>(
+    () => [
+      {
+        id: "act-1",
+        type: "request",
+        title: "Share an item to get started",
+        description: "List an item so fellow Spartans can reach out to you",
+        date: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+        status: "Tip",
+      },
+      {
+        id: "act-2",
+        type: "rating",
+        title: "Collect reviews",
+        description: "Complete transactions to build your reputation",
+        date: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000),
+        status: "Tip",
+      },
+    ],
+    [],
+  )
+
+  const recentActivity = useMemo<ActivityEntry[]>(() => {
+    const activity: ActivityEntry[] = lenderRequestsForCurrentUser.map((req) => ({
+      id: `lender-${req.id}`,
+      type: "request",
+      title: `Request for ${req.itemTitle}`,
+      description: `${req.borrowerName} would like to borrow on ${req.preferredDate}`,
+      date: req.requestDate,
+      status: req.status.charAt(0).toUpperCase() + req.status.slice(1),
+    }))
+
+    borrowerRequestsForCurrentUser.forEach((req) => {
+      const statusLabel = req.status.charAt(0).toUpperCase() + req.status.slice(1)
+      const type: ActivityEntry["type"] =
+        req.status === "completed" ? "completion" : req.status === "approved" ? "approval" : "request"
+      activity.push({
+        id: `borrower-${req.id}`,
+        type,
+        title: `${statusLabel} · ${req.itemTitle}`,
+        description:
+          type === "request"
+            ? `Waiting for ${req.lenderName} to respond`
+            : type === "approval"
+              ? `${req.lenderName} approved your request`
+              : `${req.lenderName} marked the borrowing complete`,
+        date: req.requestDate,
+        status: statusLabel,
+      })
+    })
+
+    activity.sort((a, b) => b.date.getTime() - a.date.getTime())
+
+    if (activity.length === 0) {
+      return baseRecentActivity
+    }
+
+    return [...activity, ...baseRecentActivity].slice(0, 6)
+  }, [baseRecentActivity, borrowerRequestsForCurrentUser, lenderRequestsForCurrentUser])
+
+  useEffect(() => {
+    if (userMode !== "requests") return
+    setRequestsView((prev) => {
+      if (prev === "lender" && lenderRequestsForCurrentUser.length > 0) return prev
+      if (prev === "borrower" && borrowerRequestsForCurrentUser.length > 0) return prev
+      if (lenderRequestsForCurrentUser.length > 0) return "lender"
+      return "borrower"
+    })
+  }, [
+    userMode,
+    borrowerRequestsForCurrentUser.length,
+    lenderRequestsForCurrentUser.length,
+  ])
+
+  useEffect(() => {
+    if (userMode === "requests" && requestsView === "lender") {
+      setLenderNotification(null)
+    }
+  }, [requestsView, userMode])
 
   const handleLogin = (user: AuthUser) => {
     setCurrentUser({
@@ -461,51 +685,179 @@ export default function Home() {
     if (selectedItem && currentUser && selectedItem.ownerId === currentUser.id) {
       return
     }
+    setRequestError(null)
     setShowRequestModal(true)
   }
 
-  const handleSubmitRequest = (data: any) => {
+  const handleSubmitRequest = async (data: { date: string; message: string }): Promise<boolean> => {
     if (!currentUser || !selectedItem) {
       console.error("Attempted to submit a borrow request without an active user or selected item.")
-      return
+      return false
     }
 
-    const newRequest: BorrowRequest = {
-      id: `req-${Date.now()}`,
-      itemId: selectedItem.id,
-      itemTitle: selectedItem.title,
-      itemImage: selectedItem.image ?? null,
-      borrowerName: currentUser.name,
-      borrowerRating: currentUser.rating,
-      requestDate: new Date(),
-      preferredDate: data.date,
+    const hasExistingRequest = borrowRequests.some(
+      (request) => request.itemId === selectedItem.id && request.borrowerId === currentUser.id,
+    )
+
+    if (hasExistingRequest) {
+      setRequestError("You already requested this item. Please wait for the lender to respond.")
+      return false
+    }
+
+    let lenderEmail = selectedItem.lender.email ?? null
+
+    if (!lenderEmail) {
+      try {
+        const { data: itemRecord, error: itemError } = await supabase
+          .from("items")
+          .select("lender_email, owner_email")
+          .eq("id", selectedItem.id)
+          .maybeSingle()
+
+        if (!itemError && itemRecord) {
+          lenderEmail = itemRecord.lender_email ?? itemRecord.owner_email ?? null
+        }
+      } catch (lookupError) {
+        console.error("Failed to look up lender email", lookupError)
+      }
+    }
+
+    const payload = {
+      item_id: selectedItem.id,
+      item_title: selectedItem.title,
+      item_image: selectedItem.image ?? null,
+      borrower_id: currentUser.id,
+      borrower_name: currentUser.name,
+      borrower_email: currentUser.email ?? "",
+      borrower_rating: currentUser.rating ?? 0,
+      preferred_date: data.date,
       message: data.message,
       status: "pending",
-      lenderName: selectedItem.lender.name,
-      lenderEmail: "lender@batstateU.edu",
+      owner_id: selectedItem.ownerId ?? null,
+      lender_name: selectedItem.lender.name,
+      lender_email: lenderEmail,
+      decision_message: null,
     }
-    setBorrowRequests([...borrowRequests, newRequest])
-    alert(`Request submitted for ${selectedItem.title}!\nDate: ${data.date}`)
-    setShowRequestModal(false)
+
+    try {
+      const { data: inserted, error } = await supabase
+        .from("borrow_requests")
+        .insert(payload)
+        .select()
+        .single()
+
+      if (error) {
+        console.error("Failed to submit borrow request", error)
+        setRequestError(error.message ?? "Failed to submit request. Please try again.")
+        return false
+      }
+
+      if (inserted) {
+        const mapped = mapBorrowRequestRecord(inserted)
+        const enriched = !mapped.lenderEmail && lenderEmail ? { ...mapped, lenderEmail } : mapped
+        setBorrowRequests((prev) => [enriched, ...prev.filter((req) => req.id !== enriched.id)])
+        setRequestError(null)
+        alert(`Request submitted for ${enriched.itemTitle}!\nDate: ${enriched.preferredDate}`)
+        setShowRequestModal(false)
+        setRequestsView("borrower")
+
+        const emailTarget = enriched.lenderEmail || lenderEmail
+        if (emailTarget) {
+          void sendLenderEmailNotification({
+            email: emailTarget,
+            itemTitle: enriched.itemTitle,
+            borrowerName: enriched.borrowerName,
+            preferredDate: enriched.preferredDate,
+            message: enriched.message || "",
+          })
+        }
+
+        return true
+      }
+    } catch (err) {
+      console.error("Unexpected error while submitting borrow request", err)
+      setRequestError(
+        err instanceof Error ? err.message : "Unexpected error occurred while submitting the borrow request.",
+      )
+    }
+
+    return false
   }
 
-  const handleApproveRequest = (requestId: string) => {
-    setBorrowRequests(
-      borrowRequests.map((req) => (req.id === requestId ? { ...req, status: "approved" as const } : req)),
-    )
-    setShowScheduleModal(true)
+  const handleApproveRequest = async (requestId: string, responseMessage?: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("borrow_requests")
+        .update({ status: "approved", decision_message: responseMessage ?? null })
+        .eq("id", requestId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error("Failed to approve borrow request", error)
+        alert("Failed to approve the request. Please try again.")
+        return
+      }
+
+      if (data) {
+        const mapped = mapBorrowRequestRecord(data)
+        setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
+        setShowScheduleModal(true)
+      }
+    } catch (err) {
+      console.error("Unexpected error while approving borrow request", err)
+      alert("An unexpected error occurred while approving the request.")
+    }
   }
 
-  const handleRejectRequest = (requestId: string) => {
-    setBorrowRequests(
-      borrowRequests.map((req) => (req.id === requestId ? { ...req, status: "rejected" as const } : req)),
-    )
+  const handleRejectRequest = async (requestId: string, responseMessage?: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("borrow_requests")
+        .update({ status: "rejected", decision_message: responseMessage ?? null })
+        .eq("id", requestId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error("Failed to reject borrow request", error)
+        alert("Failed to reject the request. Please try again.")
+        return
+      }
+
+      if (data) {
+        const mapped = mapBorrowRequestRecord(data)
+        setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
+      }
+    } catch (err) {
+      console.error("Unexpected error while rejecting borrow request", err)
+      alert("An unexpected error occurred while rejecting the request.")
+    }
   }
 
-  const handleCompleteRequest = (requestId: string) => {
-    setBorrowRequests(
-      borrowRequests.map((req) => (req.id === requestId ? { ...req, status: "completed" as const } : req)),
-    )
+  const handleCompleteRequest = async (requestId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from("borrow_requests")
+        .update({ status: "completed" })
+        .eq("id", requestId)
+        .select()
+        .single()
+
+      if (error) {
+        console.error("Failed to mark borrow request as completed", error)
+        alert("Failed to mark the request as completed. Please try again.")
+        return
+      }
+
+      if (data) {
+        const mapped = mapBorrowRequestRecord(data)
+        setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
+      }
+    } catch (err) {
+      console.error("Unexpected error while completing borrow request", err)
+      alert("An unexpected error occurred while completing the request.")
+    }
   }
 
   const handleCreateSchedule = (data: { startDate: string; endDate: string }) => {
@@ -605,6 +957,7 @@ export default function Home() {
               lender_name: currentUser.fullName || currentUser.name,
               lender_rating: currentUser.rating ?? 5,
               lender_reviews: currentUser.itemsLent ?? 0,
+              lender_email: currentUser.email ?? null,
             })
             .eq("id", editingItemId)
             .eq("owner_id", currentUser.id)
@@ -618,6 +971,7 @@ export default function Home() {
               lender_rating: currentUser.rating ?? 5,
               lender_reviews: currentUser.itemsLent ?? 0,
               owner_id: currentUser.id,
+              lender_email: currentUser.email ?? null,
             })
             .select()
             .single()
@@ -793,6 +1147,7 @@ export default function Home() {
         onLoginClick={() => setShowSignInModal(true)}
         userMode={userMode}
         onModeChange={setUserMode}
+        pendingLenderRequests={pendingLenderRequests}
       />
 
       <main className="container mx-auto px-4 py-8">
@@ -817,10 +1172,24 @@ export default function Home() {
           </div>
         ) : (
           <>
+            {lenderNotification && (
+              <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-md border border-primary/40 bg-primary/5 px-4 py-3">
+                <span className="text-sm text-primary">{lenderNotification}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="text-primary hover:text-primary"
+                  onClick={() => setLenderNotification(null)}
+                >
+                  Dismiss
+                </Button>
+              </div>
+            )}
             {userMode === "dashboard" ? (
               <Dashboard
                 currentUser={currentUser}
-                pendingRequests={borrowRequests.filter((r) => r.status === "pending").length}
+                pendingRequests={pendingLenderRequests}
                 activeSchedules={
                   borrowSchedules.filter(
                     (s) => s.status === "awaiting_handoff" || s.status === "borrowed",
@@ -858,15 +1227,42 @@ export default function Home() {
               </>
             ) : userMode === "requests" ? (
               <>
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold text-foreground mb-6 flex items-center gap-2">
-                    <Inbox size={32} />
-                    My Requests
-                  </h2>
+                <div className="mb-8 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <h2 className="text-3xl font-bold text-foreground flex items-center gap-2">
+                      <Inbox size={32} />
+                      Requests Center
+                    </h2>
+                    <div className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/30 p-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={requestsView === "borrower" ? "default" : "ghost"}
+                        className="text-sm"
+                        onClick={() => setRequestsView("borrower")}
+                      >
+                        As Borrower
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={requestsView === "lender" ? "default" : "ghost"}
+                        className="text-sm"
+                        onClick={() => setRequestsView("lender")}
+                      >
+                        As Lender
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {requestsView === "borrower"
+                      ? "Track the items you've asked to borrow and monitor their status."
+                      : "Review incoming requests for your listed items and respond quickly to keep things moving."}
+                  </p>
                 </div>
                 <RequestsDashboard
-                  requests={borrowRequests}
-                  currentUserRole="borrower"
+                  requests={requestsView === "borrower" ? borrowerRequestsForCurrentUser : lenderRequestsForCurrentUser}
+                  currentUserRole={requestsView}
                   onApprove={handleApproveRequest}
                   onReject={handleRejectRequest}
                   onComplete={handleCompleteRequest}
@@ -1120,6 +1516,7 @@ export default function Home() {
           onClose={() => setShowRequestModal(false)}
           item={selectedItem}
           onSubmit={handleSubmitRequest}
+          errorMessage={requestError}
         />
       )}
 

@@ -11,6 +11,7 @@ interface NavigationProps {
   onLoginClick: () => void
   userMode: "dashboard" | "browse" | "lend" | "requests" | "schedule" | "profile"
   onModeChange: (mode: "dashboard" | "browse" | "lend" | "requests" | "schedule" | "profile") => void
+  pendingLenderRequests?: number
 }
 
 export default function Navigation({
@@ -20,6 +21,7 @@ export default function Navigation({
   onLoginClick,
   userMode,
   onModeChange,
+  pendingLenderRequests = 0,
 }: NavigationProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
@@ -75,7 +77,14 @@ export default function Navigation({
                         : "text-muted-foreground hover:text-foreground"
                     }`}
                   >
-                    {item.label}
+                    <span className="flex items-center gap-1">
+                      {item.label}
+                      {item.mode === "requests" && pendingLenderRequests > 0 && (
+                        <span className="inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-primary px-1 text-[11px] font-semibold text-primary-foreground">
+                          {pendingLenderRequests}
+                        </span>
+                      )}
+                    </span>
                   </Button>
                 ))}
               </div>
@@ -129,7 +138,14 @@ export default function Navigation({
                 }`}
                 onClick={() => handleNavClick(item.mode)}
               >
-                {item.label}
+                <span className="flex items-center gap-2">
+                  {item.label}
+                  {item.mode === "requests" && pendingLenderRequests > 0 && (
+                    <span className="inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full bg-primary px-1 text-xs font-semibold text-primary-foreground">
+                      {pendingLenderRequests}
+                    </span>
+                  )}
+                </span>
               </Button>
             ))}
 

@@ -10,28 +10,34 @@ interface RequestModalProps {
   isOpen: boolean
   onClose: () => void
   item: any
-  onSubmit: (data: any) => void
+  onSubmit: (data: { date: string; message: string }) => Promise<boolean> | boolean
+  errorMessage?: string | null
 }
 
-export default function RequestModal({ isOpen, onClose, item, onSubmit }: RequestModalProps) {
+export default function RequestModal({ isOpen, onClose, item, onSubmit, errorMessage }: RequestModalProps) {
   const [date, setDate] = useState("")
   const [message, setMessage] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
 
   if (!isOpen || !item) return null
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!date) {
       alert("Please select a date")
       return
     }
     setIsSubmitting(true)
-    setTimeout(() => {
-      onSubmit({ date, message })
-      setDate("")
-      setMessage("")
+    try {
+      const result = await onSubmit({ date, message })
+      if (result) {
+        setDate("")
+        setMessage("")
+      }
+    } catch (error) {
+      console.error("Failed to submit borrow request", error)
+    } finally {
       setIsSubmitting(false)
-    }, 500)
+    }
   }
 
   return (
@@ -43,6 +49,12 @@ export default function RequestModal({ isOpen, onClose, item, onSubmit }: Reques
 
         <h2 className="text-2xl font-bold mb-2 text-foreground">Request to Borrow</h2>
         <p className="text-muted-foreground mb-6">{item.title}</p>
+
+        {errorMessage && (
+          <div className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {errorMessage}
+          </div>
+        )}
 
         <div className="space-y-4">
           <div>

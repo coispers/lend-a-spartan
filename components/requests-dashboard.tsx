@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -14,19 +14,23 @@ interface BorrowRequest {
   itemImage: string | null
   borrowerName: string
   borrowerRating: number
+  borrowerId: string
+  borrowerEmail: string
   requestDate: Date
   preferredDate: string
   message: string
   status: "pending" | "approved" | "rejected" | "completed"
+  ownerId: string | null
   lenderName: string
-  lenderEmail: string
+  lenderEmail: string | null
+  decisionMessage?: string | null
 }
 
 interface RequestsDashboardProps {
   requests: BorrowRequest[]
   currentUserRole: "borrower" | "lender"
-  onApprove: (requestId: string) => void
-  onReject: (requestId: string) => void
+  onApprove: (requestId: string, responseMessage?: string) => void
+  onReject: (requestId: string, responseMessage?: string) => void
   onComplete: (requestId: string) => void
 }
 
@@ -38,6 +42,15 @@ export default function RequestsDashboard({
   onComplete,
 }: RequestsDashboardProps) {
   const [selectedRequest, setSelectedRequest] = useState<BorrowRequest | null>(null)
+  const [decisionMessage, setDecisionMessage] = useState("")
+
+  useEffect(() => {
+    if (!selectedRequest) {
+      setDecisionMessage("")
+      return
+    }
+    setDecisionMessage(selectedRequest.decisionMessage ?? "")
+  }, [selectedRequest])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -214,13 +227,41 @@ export default function RequestsDashboard({
                     <p className="text-sm break-words">{selectedRequest.message || "No message provided"}</p>
                   </div>
                 </div>
+
+                {selectedRequest.status !== "pending" && selectedRequest.decisionMessage && (
+                  <div className="flex items-start gap-2">
+                    <MessageSquare size={18} className="text-primary mt-1 flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">
+                        {selectedRequest.status === "rejected" ? "Lender Reason" : "Lender Message"}
+                      </p>
+                      <p className="text-sm break-words">{selectedRequest.decisionMessage}</p>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {currentUserRole === "lender" && selectedRequest.status === "pending" && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium text-muted-foreground">
+                    Message to borrower (optional)
+                  </label>
+                  <textarea
+                    value={decisionMessage}
+                    onChange={(event) => setDecisionMessage(event.target.value)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground"
+                    rows={3}
+                    placeholder="Let the borrower know why you approved or rejected the request..."
+                  />
+                </div>
+              )}
 
               {currentUserRole === "lender" && selectedRequest.status === "pending" && (
                 <div className="flex gap-2 pt-2">
                   <Button
                     onClick={() => {
-                      onApprove(selectedRequest.id)
+                      const trimmed = decisionMessage.trim()
+                      onApprove(selectedRequest.id, trimmed ? trimmed : undefined)
                       setSelectedRequest(null)
                     }}
                     className="flex-1 bg-green-600 hover:bg-green-700 text-white text-sm h-10"
@@ -229,7 +270,8 @@ export default function RequestsDashboard({
                   </Button>
                   <Button
                     onClick={() => {
-                      onReject(selectedRequest.id)
+                      const trimmed = decisionMessage.trim()
+                      onReject(selectedRequest.id, trimmed ? trimmed : undefined)
                       setSelectedRequest(null)
                     }}
                     variant="outline"
