@@ -398,6 +398,38 @@ export default function Home() {
     [],
   )
 
+  const sendBorrowerEmailNotification = useCallback(
+    async (payload: {
+      email: string
+      itemTitle: string
+      borrowerName: string
+      lenderName: string
+      preferredDate: string
+      decisionMessage?: string | null
+      notificationType: "approval" | "rejection"
+    }) => {
+      try {
+        const { error } = await supabase.functions.invoke("send-lender-notification", {
+          body: {
+            email: payload.email,
+            itemTitle: payload.itemTitle,
+            borrowerName: payload.borrowerName,
+            lenderName: payload.lenderName,
+            preferredDate: payload.preferredDate,
+            decisionMessage: payload.decisionMessage ?? "",
+            notificationType: payload.notificationType,
+          },
+        })
+        if (error) {
+          throw error
+        }
+      } catch (error) {
+        console.error("Failed to send borrower email notification", error)
+      }
+    },
+    [],
+  )
+
   const fetchItems = useCallback(async () => {
     setItemsLoading(true)
     setItemsError(null)
@@ -803,6 +835,18 @@ export default function Home() {
         const mapped = mapBorrowRequestRecord(data)
         setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
         setShowScheduleModal(true)
+
+        if (mapped.borrowerEmail) {
+          void sendBorrowerEmailNotification({
+            email: mapped.borrowerEmail,
+            itemTitle: mapped.itemTitle,
+            borrowerName: mapped.borrowerName,
+            lenderName: mapped.lenderName,
+            preferredDate: mapped.preferredDate,
+            decisionMessage: responseMessage ?? mapped.decisionMessage ?? null,
+            notificationType: "approval",
+          })
+        }
       }
     } catch (err) {
       console.error("Unexpected error while approving borrow request", err)
@@ -828,6 +872,18 @@ export default function Home() {
       if (data) {
         const mapped = mapBorrowRequestRecord(data)
         setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
+
+        if (mapped.borrowerEmail) {
+          void sendBorrowerEmailNotification({
+            email: mapped.borrowerEmail,
+            itemTitle: mapped.itemTitle,
+            borrowerName: mapped.borrowerName,
+            lenderName: mapped.lenderName,
+            preferredDate: mapped.preferredDate,
+            decisionMessage: responseMessage ?? mapped.decisionMessage ?? null,
+            notificationType: "rejection",
+          })
+        }
       }
     } catch (err) {
       console.error("Unexpected error while rejecting borrow request", err)
