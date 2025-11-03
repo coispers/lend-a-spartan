@@ -283,6 +283,8 @@ export default function Home() {
       return Number.isFinite(parsed) ? parsed : fallback
     }
 
+    const quantity = safeNumber(record?.quantity, 1)
+
     return {
       id: String(record?.id ?? record?.uuid ?? `item-${Date.now()}`),
       title: record?.title ?? "Untitled Item",
@@ -296,12 +298,12 @@ export default function Home() {
         reviews: safeNumber(record?.lender_reviews, 0),
         email: record?.lender_email ?? record?.owner_email ?? record?.email ?? null,
       },
-      availability: record?.availability ?? "Available",
+      availability: record?.availability ?? (quantity > 0 ? "Available" : "Unavailable"),
       deposit: Boolean(record?.deposit ?? record?.deposit_required ?? false),
       campus: record?.campus ?? "Main Campus",
       description: record?.description ?? "",
       createdAt: record?.created_at ? new Date(record.created_at) : new Date(),
-      quantity: safeNumber(record?.quantity, 1),
+      quantity,
     }
   }, [])
 
@@ -429,6 +431,53 @@ export default function Home() {
     },
     [],
   )
+
+  const updateItemQuantity = useCallback(async (itemId: string, adjustment: number) => {
+    let nextQuantity: number | null = null
+    let nextAvailability: string | null = null
+
+    setItems((prev) =>
+      prev.map((item) => {
+        if (item.id !== itemId) return item
+        const quantity = Math.max(0, (item.quantity ?? 0) + adjustment)
+        nextQuantity = quantity
+        const availability = quantity > 0 ? "Available" : "Unavailable"
+        nextAvailability = availability
+        return { ...item, quantity, availability }
+      }),
+    )
+
+    setSelectedItem((prev) => {
+      if (!prev || prev.id !== itemId || nextQuantity === null || nextAvailability === null) return prev
+      return { ...prev, quantity: nextQuantity, availability: nextAvailability }
+    })
+
+    if (nextQuantity === null || nextAvailability === null) {
+      return
+    }
+
+    try {
+      const numericId = Number(itemId)
+      const query = supabase
+        .from("items")
+        .update({
+          quantity: nextQuantity,
+          availability: nextAvailability,
+        })
+
+      const { data, error } = Number.isFinite(numericId)
+        ? await query.eq("id", numericId).select("id, quantity").maybeSingle()
+        : await query.eq("id", itemId).select("id, quantity").maybeSingle()
+
+      if (error) {
+        console.error("Failed to update item quantity", error)
+      } else if (!data) {
+        console.warn("Item quantity update did not match any row", { itemId, nextQuantity })
+      }
+    } catch (err) {
+      console.error("Unexpected error while updating item quantity", err)
+    }
+  }, [])
 
   const fetchItems = useCallback(async () => {
     setItemsLoading(true)
@@ -559,6 +608,10 @@ export default function Home() {
     const normalizedSearch = searchQuery.trim().toLowerCase()
 
     const filtered = items.filter((item) => {
+      const isOwnerViewing = currentUser && item.ownerId === currentUser.id
+      if (!isOwnerViewing && (item.quantity ?? 0) <= 0) {
+        return false
+      }
       const matchesSearch = item.title.toLowerCase().includes(normalizedSearch)
       const matchesCategory =
         selectedCategory === "all" || item.category.toLowerCase() === selectedCategory.toLowerCase()
@@ -582,13 +635,23 @@ export default function Home() {
     })
 
     return sorted
-  }, [filterCondition, items, searchQuery, selectedCategory, sortBy])
+  }, [currentUser?.id, filterCondition, items, searchQuery, selectedCategory, sortBy])
 
   const isEditingListing = Boolean(editingItemId)
   const borrowerRequestsForCurrentUser = useMemo(() => {
     if (!currentUser) return []
     return borrowRequests.filter((req) => req.borrowerId === currentUser.id)
   }, [borrowRequests, currentUser])
+
+  const activeBorrowRequestsByItem = useMemo(() => {
+    const map = new Map<string, BorrowRequest>()
+    borrowerRequestsForCurrentUser.forEach((req) => {
+      if (req.status === "pending" || req.status === "approved") {
+        map.set(req.itemId, req)
+      }
+    })
+    return map
+  }, [borrowerRequestsForCurrentUser])
 
   const lenderRequestsForCurrentUser = useMemo(() => {
     if (!currentUser) return []
@@ -714,8 +777,16 @@ export default function Home() {
   }
 
   const handleRequestBorrow = () => {
-    if (selectedItem && currentUser && selectedItem.ownerId === currentUser.id) {
+    if (!selectedItem) return
+    if (currentUser && selectedItem.ownerId === currentUser.id) {
       return
+    }
+    if (currentUser) {
+      const activeRequest = activeBorrowRequestsByItem.get(selectedItem.id)
+      if (activeRequest) {
+        alert("You already have an active request for this item. Please wait for the lender to respond.")
+        return
+      }
     }
     setRequestError(null)
     setShowRequestModal(true)
@@ -727,12 +798,15 @@ export default function Home() {
       return false
     }
 
-    const hasExistingRequest = borrowRequests.some(
-      (request) => request.itemId === selectedItem.id && request.borrowerId === currentUser.id,
+    const hasActiveRequest = borrowRequests.some(
+      (request) =>
+        request.itemId === selectedItem.id &&
+        request.borrowerId === currentUser.id &&
+        (request.status === "pending" || request.status === "approved"),
     )
 
-    if (hasExistingRequest) {
-      setRequestError("You already requested this item. Please wait for the lender to respond.")
+    if (hasActiveRequest) {
+      setRequestError("You already have an active request for this item. Please wait for the lender to respond.")
       return false
     }
 
@@ -936,7 +1010,8 @@ export default function Home() {
         status: "awaiting_handoff",
         returnReady: false,
       }
-      setBorrowSchedules([...borrowSchedules, newSchedule])
+      setBorrowSchedules((prev) => [...prev, newSchedule])
+      void updateItemQuantity(approvedRequest.itemId, -1)
       setShowScheduleModal(false)
       alert("Schedule created successfully!")
     }
@@ -1127,6 +1202,7 @@ export default function Home() {
     }
 
     setScannerError(null)
+    const scheduleItemId = selectedSchedule.itemId
 
     if (scanType === "handoff") {
       setBorrowSchedules((prev) =>
@@ -1145,6 +1221,7 @@ export default function Home() {
           sched.id === selectedSchedule.id ? { ...sched, status: "completed" as const, returnReady: false } : sched,
         ),
       )
+      void updateItemQuantity(scheduleItemId, 1)
       alert(`✓ Item return confirmed!\n\nTransaction completed with ${selectedSchedule.borrowerName}`)
 
       setRatingTarget({
@@ -1161,13 +1238,14 @@ export default function Home() {
   }
 
   const handleMarkScheduleComplete = (scheduleId: string) => {
-    setBorrowSchedules(
-      borrowSchedules.map((sched) =>
+    setBorrowSchedules((prev) =>
+      prev.map((sched) =>
         sched.id === scheduleId ? { ...sched, status: "completed" as const, returnReady: false } : sched,
       ),
     )
     const completedSchedule = borrowSchedules.find((s) => s.id === scheduleId)
     if (completedSchedule) {
+      void updateItemQuantity(completedSchedule.itemId, 1)
       setRatingTarget({
         userName: completedSchedule.borrowerName,
         itemTitle: completedSchedule.itemTitle,
@@ -1562,7 +1640,19 @@ export default function Home() {
           onRequestBorrow={handleRequestBorrow}
           canEdit={Boolean(currentUser && selectedItem.ownerId === currentUser.id)}
           onEdit={() => startEditingItem(selectedItem)}
-          canRequestBorrow={!currentUser || selectedItem.ownerId !== currentUser.id}
+          canRequestBorrow={
+            !currentUser ||
+            (selectedItem.ownerId !== currentUser.id && !activeBorrowRequestsByItem.get(selectedItem.id))
+          }
+          requestDisabledReason={
+            !currentUser
+              ? undefined
+              : selectedItem.ownerId === currentUser.id
+                ? "You listed this item. Borrowers will see the request button here."
+                : activeBorrowRequestsByItem.get(selectedItem.id)
+                  ? "You already have an active request for this item."
+                  : undefined
+          }
         />
       )}
 

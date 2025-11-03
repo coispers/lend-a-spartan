@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { X, Star, MapPin, Clock, Shield } from "lucide-react"
+import { X, Star, MapPin, Clock, Shield, Package } from "lucide-react"
 
 interface ItemDetailModalProps {
   isOpen: boolean
@@ -12,6 +12,7 @@ interface ItemDetailModalProps {
   canEdit?: boolean
   onEdit?: () => void
   canRequestBorrow?: boolean
+  requestDisabledReason?: string
 }
 
 export default function ItemDetailModal({
@@ -22,6 +23,7 @@ export default function ItemDetailModal({
   canEdit = false,
   onEdit,
   canRequestBorrow = true,
+  requestDisabledReason,
 }: ItemDetailModalProps) {
   if (!isOpen || !item) return null
 
@@ -73,6 +75,15 @@ export default function ItemDetailModal({
                 <p className="font-semibold">{item.availability}</p>
               </div>
             </div>
+            <div className="flex items-center gap-2">
+              <Package size={20} className="text-primary" />
+              <div>
+                <p className="text-xs text-muted-foreground">Quantity Available</p>
+                <p className="font-semibold">
+                  {item.quantity > 0 ? item.quantity : "Out of stock"}
+                </p>
+              </div>
+            </div>
             {item.deposit && (
               <div className="flex items-center gap-2">
                 <Shield size={20} className="text-primary" />
@@ -114,7 +125,7 @@ export default function ItemDetailModal({
               </Button>
             ) : (
               <div className="w-full text-center text-sm text-muted-foreground border border-dashed border-border rounded-md px-4 py-3">
-                You listed this item. Borrowers will see the request button here.
+                {requestDisabledReason || "Requesting is currently unavailable for this item."}
               </div>
             )}
             <Button variant="outline" onClick={onClose} className="w-full bg-transparent">

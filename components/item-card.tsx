@@ -1,7 +1,7 @@
 "use client"
 
 import { Card } from "@/components/ui/card"
-import { Star, MapPin } from "lucide-react"
+import { Star, MapPin, Package } from "lucide-react"
 
 interface ItemCardProps {
   item: any
@@ -34,9 +34,15 @@ export default function ItemCard({ item, onClick }: ItemCardProps) {
 
         <p className="text-xs text-muted-foreground mb-3">{item.lender.name}</p>
 
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <MapPin size={12} />
-          {item.campus}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <span className="flex items-center gap-1">
+            <MapPin size={12} />
+            {item.campus}
+          </span>
+          <span className="flex items-center gap-1 font-semibold text-foreground">
+            <Package size={12} className="text-primary" />
+            {item.quantity > 0 ? `${item.quantity} available` : "Out of stock"}
+          </span>
         </div>
       </div>
     </Card>
