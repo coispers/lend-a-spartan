@@ -9,10 +9,23 @@ interface ItemDetailModalProps {
   onClose: () => void
   item: any
   onRequestBorrow: () => void
+  canEdit?: boolean
+  onEdit?: () => void
+  canRequestBorrow?: boolean
 }
 
-export default function ItemDetailModal({ isOpen, onClose, item, onRequestBorrow }: ItemDetailModalProps) {
+export default function ItemDetailModal({
+  isOpen,
+  onClose,
+  item,
+  onRequestBorrow,
+  canEdit = false,
+  onEdit,
+  canRequestBorrow = true,
+}: ItemDetailModalProps) {
   if (!isOpen || !item) return null
+
+  const descriptionText = typeof item.description === "string" ? item.description.trim() : ""
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -71,6 +84,15 @@ export default function ItemDetailModal({ isOpen, onClose, item, onRequestBorrow
             )}
           </div>
 
+          <div className="mb-6">
+            <h3 className="font-semibold mb-2">Description</h3>
+            {descriptionText ? (
+              <p className="text-sm leading-relaxed text-foreground/90 whitespace-pre-line">{descriptionText}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">No description provided yet.</p>
+            )}
+          </div>
+
           <div className="mb-6 pb-6 border-b border-border">
             <h3 className="font-semibold mb-2">Lender Information</h3>
             <p className="text-foreground font-medium mb-1">{item.lender.name}</p>
@@ -78,12 +100,23 @@ export default function ItemDetailModal({ isOpen, onClose, item, onRequestBorrow
           </div>
 
           <div className="space-y-3">
-            <Button
-              onClick={onRequestBorrow}
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-6 text-lg"
-            >
-              Request to Borrow
-            </Button>
+            {canEdit && typeof onEdit === "function" && (
+              <Button onClick={onEdit} className="w-full py-6 text-lg" variant="outline">
+                Edit Item Details
+              </Button>
+            )}
+            {canRequestBorrow ? (
+              <Button
+                onClick={onRequestBorrow}
+                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground py-6 text-lg"
+              >
+                Request to Borrow
+              </Button>
+            ) : (
+              <div className="w-full text-center text-sm text-muted-foreground border border-dashed border-border rounded-md px-4 py-3">
+                You listed this item. Borrowers will see the request button here.
+              </div>
+            )}
             <Button variant="outline" onClick={onClose} className="w-full bg-transparent">
               Close
             </Button>

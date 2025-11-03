@@ -2,33 +2,43 @@
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, Clock, AlertCircle, QrCode } from "lucide-react"
+import { Calendar, Clock, AlertCircle, QrCode, CheckCircle, Scan } from "lucide-react"
 
 interface BorrowSchedule {
   id: string
-  itemId: number
+  itemId: string
   itemTitle: string
   borrowerName: string
+  lenderName: string
   borrowerQRCode: string
+  lenderQRCode: string
   startDate: string
   endDate: string
-  status: "scheduled" | "active" | "item_given" | "overdue" | "completed"
-  qrCode: string
+  status: "scheduled" | "awaiting_handoff" | "borrowed" | "overdue" | "completed"
+  returnReady: boolean
 }
 
 interface BorrowScheduleProps {
   schedules: BorrowSchedule[]
-  onGenerateQR: (schedule: BorrowSchedule) => void
+  currentUserName: string
+  onGenerateQR: (schedule: BorrowSchedule, qrType: "borrower" | "lender") => void
   onScanQR: (schedule: BorrowSchedule, scanType: "handoff" | "return") => void
+  forceAllActions?: boolean
 }
 
-export default function BorrowScheduleComponent({ schedules, onGenerateQR, onScanQR }: BorrowScheduleProps) {
+export default function BorrowScheduleComponent({
+  schedules,
+  currentUserName,
+  onGenerateQR,
+  onScanQR,
+  forceAllActions = false,
+}: BorrowScheduleProps) {
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "active":
+      case "awaiting_handoff":
         return "bg-blue-100 text-blue-800"
-      case "item_given":
-        return "bg-yellow-100 text-yellow-800"
+      case "borrowed":
+        return "bg-indigo-100 text-indigo-800"
       case "overdue":
         return "bg-red-100 text-red-800"
       case "completed":
@@ -40,15 +50,16 @@ export default function BorrowScheduleComponent({ schedules, onGenerateQR, onSca
 
   const getStatusIcon = (status: string) => {
     if (status === "overdue") return <AlertCircle size={16} />
+    if (status === "borrowed" || status === "completed") return <CheckCircle size={16} />
     return <Clock size={16} />
   }
 
   const getStatusLabel = (status: string) => {
     switch (status) {
-      case "item_given":
-        return "Item Given"
-      case "active":
-        return "Active"
+      case "awaiting_handoff":
+        return "Awaiting Handoff"
+      case "borrowed":
+        return "Successfully Borrowed"
       case "overdue":
         return "Overdue"
       case "completed":
@@ -75,6 +86,15 @@ export default function BorrowScheduleComponent({ schedules, onGenerateQR, onSca
         schedules.map((schedule) => {
           const daysRemaining = calculateDaysRemaining(schedule.endDate)
           const isOverdue = daysRemaining < 0 && schedule.status !== "completed"
+          const role =
+            schedule.borrowerName === currentUserName
+              ? "borrower"
+              : schedule.lenderName === currentUserName
+                ? "lender"
+                : "viewer"
+          const testerMode = forceAllActions && role === "viewer"
+          const canBorrower = role === "borrower" || testerMode
+          const canLender = role === "lender" || testerMode
 
           return (
             <Card key={schedule.id} className="p-3 md:p-4 border border-border hover:shadow-md transition-shadow">
@@ -82,6 +102,17 @@ export default function BorrowScheduleComponent({ schedules, onGenerateQR, onSca
                 <div className="min-w-0">
                   <h3 className="font-semibold text-foreground text-sm md:text-base truncate">{schedule.itemTitle}</h3>
                   <p className="text-xs md:text-sm text-muted-foreground truncate">Borrower: {schedule.borrowerName}</p>
+                  <p className="text-xs md:text-sm text-muted-foreground truncate">Lender: {schedule.lenderName}</p>
+                  {role !== "viewer" && !testerMode && (
+                    <Badge variant="outline" className="mt-1 text-[0.65rem] uppercase tracking-wide">
+                      {role === "borrower" ? "Your Role: Borrower" : "Your Role: Lender"}
+                    </Badge>
+                  )}
+                  {testerMode && (
+                    <Badge variant="outline" className="mt-1 text-[0.65rem] uppercase tracking-wide">
+                      Testing Mode: All Actions
+                    </Badge>
+                  )}
                 </div>
                 <Badge className={`${getStatusColor(isOverdue ? "overdue" : schedule.status)} text-xs flex-shrink-0`}>
                   <span className="flex items-center gap-1">
@@ -123,32 +154,58 @@ export default function BorrowScheduleComponent({ schedules, onGenerateQR, onSca
               )}
 
               <div className="flex gap-2 flex-wrap">
-                <Button
-                  onClick={() => onGenerateQR(schedule)}
-                  variant="outline"
-                  className="flex-1 text-xs md:text-sm h-9 md:h-auto"
-                >
-                  QR Code
-                </Button>
-                {schedule.status === "active" && (
+                {canBorrower && schedule.status === "awaiting_handoff" && !isOverdue && (
+                  <Button
+                    onClick={() => onGenerateQR(schedule, "borrower")}
+                    variant="outline"
+                    className="flex-1 text-xs md:text-sm h-9 md:h-auto flex items-center justify-center gap-1"
+                  >
+                    <QrCode size={16} />
+                    <span className="hidden sm:inline">Show My QR</span>
+                    <span className="sm:hidden">Show QR</span>
+                  </Button>
+                )}
+
+                {canLender && schedule.status === "awaiting_handoff" && !isOverdue && (
                   <Button
                     onClick={() => onScanQR(schedule, "handoff")}
                     className="flex-1 bg-primary hover:bg-primary/90 text-primary-foreground text-xs md:text-sm h-9 md:h-auto flex items-center justify-center gap-1"
                   >
-                    <QrCode size={16} />
-                    <span className="hidden sm:inline">Give Item</span>
-                    <span className="sm:hidden">Give</span>
+                    <Scan size={16} />
+                    <span className="hidden sm:inline">Scan Borrower QR</span>
+                    <span className="sm:hidden">Scan QR</span>
                   </Button>
                 )}
-                {schedule.status === "item_given" && (
+
+                {canLender && (schedule.status === "borrowed" || isOverdue) && (
+                  <Button
+                    onClick={() => onGenerateQR(schedule, "lender")}
+                    variant="outline"
+                    className="flex-1 text-xs md:text-sm h-9 md:h-auto flex items-center justify-center gap-1"
+                  >
+                    <QrCode size={16} />
+                    <span className="hidden sm:inline">Generate Return QR</span>
+                    <span className="sm:hidden">Return QR</span>
+                  </Button>
+                )}
+
+                {canBorrower && (schedule.status === "borrowed" || isOverdue) && (schedule.returnReady || testerMode) && (
                   <Button
                     onClick={() => onScanQR(schedule, "return")}
                     className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs md:text-sm h-9 md:h-auto flex items-center justify-center gap-1"
                   >
-                    <QrCode size={16} />
-                    <span className="hidden sm:inline">Receive Item</span>
-                    <span className="sm:hidden">Receive</span>
+                    <Scan size={16} />
+                    <span className="hidden sm:inline">Scan Lender QR</span>
+                    <span className="sm:hidden">Scan QR</span>
                   </Button>
+                )}
+
+                {canBorrower && !schedule.returnReady && (schedule.status === "borrowed" || isOverdue) && !testerMode && (
+                  <p className="text-xs text-muted-foreground">Waiting for lender to generate return QR</p>
+                )}
+
+                {role === "viewer" && !forceAllActions && (
+                  <p className="text-xs text-muted-foreground">No actions available</p>
                 )}
               </div>
             </Card>
