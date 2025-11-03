@@ -9,9 +9,9 @@ import { CheckCircle, XCircle, Clock, MessageSquare, User, X } from "lucide-reac
 
 interface BorrowRequest {
   id: string
-  itemId: number
+  itemId: string
   itemTitle: string
-  itemImage: string
+  itemImage: string | null
   borrowerName: string
   borrowerRating: number
   requestDate: Date

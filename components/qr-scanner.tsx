@@ -1,22 +1,33 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
+import jsQR from "jsqr"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { X, Camera, AlertCircle } from "lucide-react"
+import { X, AlertCircle } from "lucide-react"
 
 interface QRScannerProps {
-  onScan: (data: string) => void
+  onScan: (data: string) => boolean | Promise<boolean>
   onClose: () => void
   title: string
   description: string
+  validationError?: string | null
+  onClearValidationError?: () => void
 }
 
-export default function QRScanner({ onScan, onClose, title, description }: QRScannerProps) {
+export default function QRScanner({
+  onScan,
+  onClose,
+  title,
+  description,
+  validationError,
+  onClearValidationError,
+}: QRScannerProps) {
   const [scannedData, setScannedData] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const animationFrameRef = useRef<number | null>(null)
 
   useEffect(() => {
     startCamera()
@@ -43,42 +54,72 @@ export default function QRScanner({ onScan, onClose, title, description }: QRSca
       const tracks = (videoRef.current.srcObject as MediaStream).getTracks()
       tracks.forEach((track) => track.stop())
     }
-  }
-
-  const captureFrame = () => {
-    if (videoRef.current && canvasRef.current) {
-      const context = canvasRef.current.getContext("2d")
-      if (context) {
-        canvasRef.current.width = videoRef.current.videoWidth
-        canvasRef.current.height = videoRef.current.videoHeight
-        context.drawImage(videoRef.current, 0, 0)
-
-        // Simulate QR code detection - in production, use a QR code library
-        const imageData = context.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height)
-        const data = imageData.data
-
-        // Simple check for QR code pattern (dark areas)
-        let darkPixels = 0
-        for (let i = 0; i < data.length; i += 4) {
-          const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3
-          if (brightness < 128) darkPixels++
-        }
-
-        // If we detect a pattern, simulate successful scan
-        if (darkPixels > imageData.data.length / 8) {
-          // In production, use jsQR or similar library to decode actual QR data
-          const simulatedQRData = `borrower-qr-${Date.now()}`
-          setScannedData(simulatedQRData)
-          setError(null)
-        }
-      }
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current)
+      animationFrameRef.current = null
     }
   }
 
-  const handleConfirmScan = () => {
+  useEffect(() => {
     if (scannedData) {
-      onScan(scannedData)
-      onClose()
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+      return
+    }
+
+    const scanFrame = () => {
+      const video = videoRef.current
+      const canvas = canvasRef.current
+      if (!video || !canvas) {
+        animationFrameRef.current = requestAnimationFrame(scanFrame)
+        return
+      }
+
+      if (video.readyState !== video.HAVE_ENOUGH_DATA) {
+        animationFrameRef.current = requestAnimationFrame(scanFrame)
+        return
+      }
+
+      const context = canvas.getContext("2d")
+      if (!context) {
+        animationFrameRef.current = requestAnimationFrame(scanFrame)
+        return
+      }
+
+      canvas.width = video.videoWidth
+      canvas.height = video.videoHeight
+      context.drawImage(video, 0, 0, canvas.width, canvas.height)
+
+      const imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+      const result = jsQR(imageData.data, imageData.width, imageData.height, { inversionAttempts: "dontInvert" })
+
+      if (result?.data) {
+        setScannedData(result.data)
+        setError(null)
+        onClearValidationError?.()
+        return
+      }
+
+      animationFrameRef.current = requestAnimationFrame(scanFrame)
+    }
+
+    animationFrameRef.current = requestAnimationFrame(scanFrame)
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
+    }
+  }, [scannedData, onClearValidationError])
+
+  const handleConfirmScan = async () => {
+    if (!scannedData) return
+    const result = await Promise.resolve(onScan(scannedData))
+    if (!result) {
+      setScannedData(null)
     }
   }
 
@@ -99,21 +140,18 @@ export default function QRScanner({ onScan, onClose, title, description }: QRSca
           </div>
         )}
 
+        {!error && validationError && !scannedData && (
+          <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-md flex items-start gap-2">
+            <AlertCircle size={18} className="text-red-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-700">{validationError}</p>
+          </div>
+        )}
+
         <div className="space-y-4">
           {!scannedData ? (
             <>
               <div className="relative bg-black rounded-lg overflow-hidden aspect-square">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  className="w-full h-full object-cover"
-                  onLoadedMetadata={() => {
-                    // Start scanning after video is ready
-                    const interval = setInterval(captureFrame, 500)
-                    return () => clearInterval(interval)
-                  }}
-                />
+                <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
                 <canvas ref={canvasRef} className="hidden" />
 
                 {/* QR Scanner overlay */}
@@ -122,15 +160,9 @@ export default function QRScanner({ onScan, onClose, title, description }: QRSca
                 </div>
               </div>
 
-              <p className="text-xs text-center text-muted-foreground">Point your camera at the borrower's QR code</p>
-
-              <Button
-                onClick={captureFrame}
-                className="w-full bg-primary hover:bg-primary/90 text-primary-foreground flex items-center justify-center gap-2"
-              >
-                <Camera size={18} />
-                Capture & Scan
-              </Button>
+              <p className="text-xs text-center text-muted-foreground">
+                Align the QR code within the frame to scan automatically
+              </p>
             </>
           ) : (
             <>
@@ -143,7 +175,14 @@ export default function QRScanner({ onScan, onClose, title, description }: QRSca
                 <Button onClick={handleConfirmScan} className="w-full bg-green-600 hover:bg-green-700 text-white">
                   Confirm Scan
                 </Button>
-                <Button onClick={() => setScannedData(null)} variant="outline" className="w-full bg-transparent">
+                <Button
+                  onClick={() => {
+                    setScannedData(null)
+                    onClearValidationError?.()
+                  }}
+                  variant="outline"
+                  className="w-full bg-transparent"
+                >
                   Scan Again
                 </Button>
               </div>
