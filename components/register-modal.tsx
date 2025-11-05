@@ -1,7 +1,8 @@
 "use client"
 
 import type React from "react"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
+import ReCAPTCHA from "react-google-recaptcha"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
@@ -17,6 +18,7 @@ interface RegisterModalProps {
 }
 
 export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToSignIn }: RegisterModalProps) {
+  const recaptchaRef = useRef<ReCAPTCHA>(null)
   const [firstName, setFirstName] = useState("")
   const [middleName, setMiddleName] = useState("")
   const [lastName, setLastName] = useState("")
@@ -59,6 +61,12 @@ export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToS
     setError("")
     setSuccessMessage("")
     setLoading(true)
+
+    const token = recaptchaRef.current?.getValue()
+    if (!token) {
+      throw new Error("Please complete the CAPTCHA verification")
+    }
+    recaptchaRef.current?.reset()
 
     if (!firstName || !lastName || !email || !password || !confirmPassword) {
       setError("Please fill in all required fields")
@@ -316,6 +324,14 @@ export default function RegisterModal({ isOpen, onClose, onRegister, onSwitchToS
                 {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
+          </div>
+
+          <div className="flex justify-center mb-4">
+            <ReCAPTCHA
+              ref={recaptchaRef}
+              sitekey={process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY!}
+              size="normal"
+            />
           </div>
 
           <Button
