@@ -15,6 +15,10 @@ interface ItemCardProps {
 }
 
 export default function ItemCard({ item, onClick, canDelete, onDelete, isDeleting, isRemoving }: ItemCardProps) {
+  const ratingValue =
+    typeof item?.lender?.rating === "number" && Number.isFinite(item.lender.rating) ? item.lender.rating : 0
+  const ratingLabel = ratingValue > 0 ? ratingValue.toFixed(2) : "New"
+
   return (
     <Card
       onClick={onClick}
@@ -53,7 +57,7 @@ export default function ItemCard({ item, onClick, canDelete, onDelete, isDeletin
         <div className="flex items-center gap-2 mb-4">
           <div className="flex items-center gap-1">
             <Star size={14} className="fill-accent text-accent" />
-            <span className="text-sm font-medium text-foreground">{item.lender.rating}</span>
+            <span className="text-sm font-medium text-foreground">{ratingLabel}</span>
           </div>
           <span className="text-xs text-muted-foreground">({item.lender.reviews})</span>
         </div>

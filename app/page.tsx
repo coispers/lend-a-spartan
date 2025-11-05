@@ -241,19 +241,48 @@ export default function Home() {
 
   useEffect(() => {
     if (!currentUser?.id) return
-    const nextRating = ratingStats.totalCount > 0 && ratingStats.overallAverage !== null
-      ? Number(ratingStats.overallAverage.toFixed(2))
-      : null
-    if (profileRatingSyncRef.current === nextRating) return
-    profileRatingSyncRef.current = nextRating
+
+    const syncedRating =
+      ratingStats.totalCount > 0 && ratingStats.overallAverage !== null
+        ? Number(ratingStats.overallAverage.toFixed(2))
+        : null
+
+    if (profileRatingSyncRef.current === syncedRating) return
+    profileRatingSyncRef.current = syncedRating
+
+    const displayRating = syncedRating ?? 0
+
+    setItems((prev) =>
+      prev.map((item) =>
+        item.ownerId === currentUser.id
+          ? { ...item, lender: { ...item.lender, rating: displayRating } }
+          : item,
+      ),
+    )
+
+    setSelectedItem((prev) =>
+      prev && prev.ownerId === currentUser.id
+        ? { ...prev, lender: { ...prev.lender, rating: displayRating } }
+        : prev,
+    )
 
     void supabase
       .from("profiles")
-      .update({ rating: nextRating })
+      .update({ rating: syncedRating })
       .eq("id", currentUser.id)
       .then(({ error }) => {
         if (error) {
           console.error("Failed to sync profile rating", error)
+        }
+      })
+
+    void supabase
+      .from("items")
+      .update({ lender_rating: syncedRating })
+      .eq("owner_id", currentUser.id)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Failed to sync item ratings", error)
         }
       })
   }, [currentUser?.id, ratingStats.overallAverage, ratingStats.totalCount])
@@ -425,7 +454,7 @@ export default function Home() {
       ownerId: record?.owner_id ? String(record.owner_id) : null,
       lender: {
         name: record?.lender_name ?? record?.owner_name ?? "Community Lender",
-        rating: safeNumber(record?.lender_rating, 5),
+        rating: safeNumber(record?.lender_rating, 0),
         reviews: safeNumber(record?.lender_reviews, 0),
         email: record?.lender_email ?? record?.owner_email ?? record?.email ?? null,
       },
@@ -1340,7 +1369,7 @@ export default function Home() {
             .update({
               ...commonPayload,
               lender_name: currentUser.fullName || currentUser.name,
-              lender_rating: currentUser.rating ?? 5,
+              lender_rating: currentUser.rating ?? 0,
               lender_reviews: currentUser.itemsLent ?? 0,
               lender_email: currentUser.email ?? null,
             })
@@ -1353,7 +1382,7 @@ export default function Home() {
               ...commonPayload,
               availability: "Available",
               lender_name: currentUser.fullName || currentUser.name,
-              lender_rating: currentUser.rating ?? 5,
+              lender_rating: currentUser.rating ?? 0,
               lender_reviews: currentUser.itemsLent ?? 0,
               owner_id: currentUser.id,
               lender_email: currentUser.email ?? null,

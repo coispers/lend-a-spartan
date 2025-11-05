@@ -50,7 +50,7 @@ export default function UserProfile({
   }
 
   const trustBadge = getTrustBadge(trustScore)
-  const formatRatingValue = (value: number | null) => (value !== null ? value.toFixed(1) : "—")
+  const formatRatingValue = (value: number | null) => (value !== null ? value.toFixed(2) : "—")
   const formatReviewCount = (count: number) => `${count} review${count === 1 ? "" : "s"}`
 
   return (
