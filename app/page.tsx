@@ -54,6 +54,7 @@ interface BorrowRequest {
 
 interface BorrowSchedule {
   id: string
+  requestId?: string | null
   itemId: string
   itemTitle: string
   borrowerName: string
@@ -144,6 +145,8 @@ interface RatingContextState {
 //set to true to enable email notifications. 
 const ENABLE_EMAIL_NOTIFICATIONS = true
 
+const slugify = (value: string) => value.trim().toLowerCase().replace(/\s+/g, "-")
+
 const summarizeSupabaseError = (error: unknown): string | null => {
   if (!error) {
     return null
@@ -208,6 +211,83 @@ export default function Home() {
   const [scheduleDraftRequest, setScheduleDraftRequest] = useState<BorrowRequest | null>(null)
 
   const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([])
+
+  const mapBorrowScheduleRecord = useCallback((record: any): BorrowSchedule => {
+    const safeString = (value: any, fallback = "") => {
+      if (value === null || value === undefined) return fallback
+      return String(value)
+    }
+
+    const safeOptionalString = (value: any) => {
+      if (value === null || value === undefined) return null
+      return String(value)
+    }
+
+    const normalizeDate = (value: any) => {
+      const raw = safeString(value, "")
+      if (!raw) return ""
+      return raw.length > 10 ? raw.slice(0, 10) : raw
+    }
+
+    const normalizeTime = (value: any) => {
+      const raw = safeOptionalString(value)
+      if (!raw) return null
+      return raw.length > 5 ? raw.slice(0, 5) : raw
+    }
+
+    const id = safeString(record?.id ?? record?.uuid ?? `sched-${Date.now()}`)
+    const borrowerName = safeString(record?.borrower_name ?? record?.borrowerName ?? "Borrower")
+    const lenderName = safeString(record?.lender_name ?? record?.lenderName ?? "Lender")
+
+    const borrowerCode =
+      safeOptionalString(record?.borrower_qr_code ?? record?.borrowerQRCode ?? null) ??
+      `borrower-${slugify(borrowerName)}-${id}`
+    const lenderCode =
+      safeOptionalString(record?.lender_qr_code ?? record?.lenderQRCode ?? null) ??
+      `lender-${slugify(lenderName)}-${id}`
+
+    return {
+      id,
+      requestId: safeOptionalString(record?.request_id ?? record?.requestId ?? null),
+      itemId: safeString(record?.item_id ?? record?.itemId ?? ""),
+      itemTitle: safeString(record?.item_title ?? record?.itemTitle ?? "Borrowed Item"),
+      borrowerName,
+      borrowerId: safeOptionalString(record?.borrower_id ?? record?.borrowerId ?? null),
+      lenderName,
+      lenderId: safeOptionalString(record?.lender_id ?? record?.lenderId ?? null),
+      borrowerQRCode: borrowerCode,
+      lenderQRCode: lenderCode,
+      startDate: normalizeDate(record?.start_date ?? record?.startDate ?? ""),
+      endDate: normalizeDate(record?.end_date ?? record?.endDate ?? ""),
+      meetingPlace: safeOptionalString(record?.meeting_place ?? record?.meetingPlace ?? null),
+      meetingTime: normalizeTime(record?.meeting_time ?? record?.meetingTime ?? null),
+      status: (record?.status ?? "scheduled") as BorrowSchedule["status"],
+      returnReady: Boolean(record?.return_ready ?? record?.returnReady ?? false),
+    }
+  }, [])
+
+  const fetchBorrowSchedules = useCallback(
+    async (userId: string) => {
+      try {
+        const { data, error } = await supabase
+          .from("borrow_schedules")
+          .select("*")
+          .or(`borrower_id.eq.${userId},lender_id.eq.${userId}`)
+          .order("start_date", { ascending: false })
+
+        if (error) {
+          console.error("Failed to load borrow schedules", error)
+          return
+        }
+
+        const mapped = (data ?? []).map(mapBorrowScheduleRecord)
+        setBorrowSchedules(mapped)
+      } catch (err) {
+        console.error("Unexpected error while loading borrow schedules", err)
+      }
+    },
+    [mapBorrowScheduleRecord],
+  )
 
   const scheduleModalContext = useMemo(() => {
     if (!scheduleDraftRequest) {
@@ -358,100 +438,96 @@ export default function Home() {
       })
   }, [currentUser?.id, ratingStats.overallAverage, ratingStats.totalCount])
 
-  const [borrowSchedules, setBorrowSchedules] = useState<BorrowSchedule[]>(() => {
-    const base = Date.now()
-    const slugify = (value: string) => value.replace(/\s+/g, "-").toLowerCase()
-    const makeCode = (prefix: "borrower" | "lender", name: string, offset: number) =>
-      `${prefix}-${slugify(name)}-${base + offset}`
+  const [borrowSchedules, setBorrowSchedules] = useState<BorrowSchedule[]>([])
 
-    return [
-      {
-        id: "sched-1",
-        itemId: "1",
-        itemTitle: "Laptop Stand",
-        borrowerName: "Alex Johnson",
-        borrowerId: null,
-        lenderName: "Juan Dela Cruz",
-        lenderId: null,
-        borrowerQRCode: makeCode("borrower", "Alex Johnson", 0),
-        lenderQRCode: makeCode("lender", "Juan Dela Cruz", 0),
-        startDate: "2025-10-20",
-        endDate: "2025-10-27",
-        meetingPlace: "Library Atrium",
-        meetingTime: "10:00",
-        status: "awaiting_handoff",
-        returnReady: false,
-      },
-      {
-        id: "sched-2",
-        itemId: "2",
-        itemTitle: "Calculus Textbook",
-        borrowerName: "Sarah Lee",
-        borrowerId: null,
-        lenderName: "Maria Santos",
-        lenderId: null,
-        borrowerQRCode: makeCode("borrower", "Sarah Lee", 1),
-        lenderQRCode: makeCode("lender", "Maria Santos", 1),
-        startDate: "2025-11-10",
-        endDate: "2025-11-17",
-        meetingPlace: "Main Gate",
-        meetingTime: "09:30",
+  const scheduleCards = useMemo(() => {
+    const scheduleList: BorrowSchedule[] = [...borrowSchedules]
+    const fulfilledRequestIds = new Set(
+      borrowSchedules
+        .map((schedule) => schedule.requestId)
+        .filter((value): value is string => Boolean(value)),
+    )
+
+    borrowRequests.forEach((request) => {
+      if (request.status !== "approved") {
+        return
+      }
+
+      if (request.id && fulfilledRequestIds.has(request.id)) {
+        return
+      }
+
+      const placeholderId = `request-${request.id}`
+      const startDate = request.preferredDate || ""
+      const endDate = request.returnDate || request.preferredDate || ""
+
+      scheduleList.push({
+        id: placeholderId,
+        requestId: request.id,
+        itemId: request.itemId,
+        itemTitle: request.itemTitle,
+        borrowerName: request.borrowerName,
+        borrowerId: request.borrowerId || null,
+        lenderName: request.lenderName,
+        lenderId: request.ownerId || null,
+        borrowerQRCode: `borrower-${slugify(request.borrowerName)}-${placeholderId}`,
+        lenderQRCode: `lender-${slugify(request.lenderName)}-${placeholderId}`,
+        startDate,
+        endDate,
+        meetingPlace: request.meetingPlace,
+        meetingTime: request.meetingTime,
         status: "scheduled",
         returnReady: false,
-      },
-      {
-        id: "sched-3",
-        itemId: "3",
-        itemTitle: "DSLR Camera",
-        borrowerName: "Miguel Rivera",
-        borrowerId: null,
-        lenderName: "Carla Gomez",
-        lenderId: null,
-        borrowerQRCode: makeCode("borrower", "Miguel Rivera", 2),
-        lenderQRCode: makeCode("lender", "Carla Gomez", 2),
-        startDate: "2025-10-25",
-        endDate: "2025-11-05",
-        meetingPlace: "Engineering Lobby",
-        meetingTime: "14:00",
-        status: "borrowed",
-        returnReady: true,
-      },
-      {
-        id: "sched-4",
-        itemId: "4",
-        itemTitle: "Wireless Microphone",
-        borrowerName: "Jenna Brooks",
-        borrowerId: null,
-        lenderName: "Noel Tan",
-        lenderId: null,
-        borrowerQRCode: makeCode("borrower", "Jenna Brooks", 3),
-        lenderQRCode: makeCode("lender", "Noel Tan", 3),
-        startDate: "2025-09-15",
-        endDate: "2025-09-22",
-        meetingPlace: "North Parking",
-        meetingTime: "16:00",
-        status: "overdue",
-        returnReady: true,
-      },
-      {
-        id: "sched-5",
-        itemId: "5",
-        itemTitle: "Graphic Tablet",
-        borrowerName: "Harper Kim",
-        borrowerId: null,
-        lenderName: "Luis Fernandez",
-        lenderId: null,
-        borrowerQRCode: makeCode("borrower", "Harper Kim", 4),
-        lenderQRCode: makeCode("lender", "Luis Fernandez", 4),
-        startDate: "2025-08-28",
-        endDate: "2025-09-04",
-        meetingPlace: "Design Center",
-        meetingTime: "11:30",
-        status: "completed",
-        returnReady: false,
-      },
-    ]
-  })
+      })
+    })
+
+    scheduleList.sort((a, b) => {
+      const aTime = new Date(a.startDate || 0).getTime()
+      const bTime = new Date(b.startDate || 0).getTime()
+      return bTime - aTime
+    })
+
+    return scheduleList
+  }, [borrowRequests, borrowSchedules])
+
+  useEffect(() => {
+    const userId = currentUser?.id
+    if (!userId) {
+      setBorrowSchedules([])
+      return
+    }
+
+    void fetchBorrowSchedules(userId)
+  }, [currentUser?.id, fetchBorrowSchedules])
+
+  useEffect(() => {
+    const userId = currentUser?.id
+    if (!userId) {
+      return
+    }
+
+    const handleChange = () => {
+      void fetchBorrowSchedules(userId)
+    }
+
+    const channel = supabase
+      .channel(`borrow-schedules-${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "borrow_schedules", filter: `borrower_id=eq.${userId}` },
+        handleChange,
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "borrow_schedules", filter: `lender_id=eq.${userId}` },
+        handleChange,
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [currentUser?.id, fetchBorrowSchedules])
 
   const [items, setItems] = useState<MarketplaceItem[]>([])
   const [itemsLoading, setItemsLoading] = useState(true)
@@ -1526,50 +1602,87 @@ export default function Home() {
     meetingTime: string
   }) => {
     const approvedRequest = scheduleDraftRequest ?? borrowRequests.find((r) => r.status === "approved")
-    if (approvedRequest) {
-      const timestamp = Date.now()
-      const borrowerSlug = approvedRequest.borrowerName.replace(/\s+/g, "-").toLowerCase()
-      const lenderName = approvedRequest.lenderName || currentUser?.name || "Lender"
-      const lenderSlug = lenderName.replace(/\s+/g, "-").toLowerCase()
-      const newSchedule: BorrowSchedule = {
-        id: `sched-${timestamp}`,
-        itemId: approvedRequest.itemId,
-        itemTitle: approvedRequest.itemTitle,
-        borrowerName: approvedRequest.borrowerName,
-        borrowerId: approvedRequest.borrowerId || null,
-        lenderName,
-        lenderId: approvedRequest.ownerId || currentUser?.id || null,
-        borrowerQRCode: `borrower-${borrowerSlug}-${timestamp}`,
-        lenderQRCode: `lender-${lenderSlug}-${timestamp}`,
-        startDate: data.startDate,
-        endDate: data.endDate,
-        meetingPlace: data.meetingPlace,
-        meetingTime: data.meetingTime,
-        status: "awaiting_handoff",
-        returnReady: false,
-      }
-      setBorrowSchedules((prev) => [...prev, newSchedule])
-      setBorrowRequests((prev) =>
-        prev.map((req) =>
-          req.id === approvedRequest.id
-            ? {
-                ...req,
-                preferredDate: data.startDate,
-                returnDate: data.endDate,
-                meetingPlace: data.meetingPlace,
-                meetingTime: data.meetingTime,
-              }
-            : req,
-        ),
-      )
-      void updateItemQuantity(approvedRequest.itemId, -1)
-      setShowScheduleModal(false)
-      setScheduleDraftRequest(null)
-      showBanner(
-        `Schedule created for ${approvedRequest.borrowerName} from ${data.startDate} to ${data.endDate} at ${data.meetingTime} in ${data.meetingPlace}.`,
-        "success",
-      )
+    if (!approvedRequest) {
+      showBanner("No approved request found to schedule.", "error")
+      return
     }
+
+    const lenderName = approvedRequest.lenderName || currentUser?.name || "Lender"
+    const timestamp = Date.now()
+    const borrowerCode = `borrower-${slugify(approvedRequest.borrowerName)}-${timestamp}`
+    const lenderCode = `lender-${slugify(lenderName)}-${timestamp}`
+    const requestIdValue = approvedRequest.id
+      ? Number.isFinite(Number(approvedRequest.id))
+        ? Number(approvedRequest.id)
+        : approvedRequest.id
+      : null
+
+    void (async () => {
+      try {
+        const { data: inserted, error } = await supabase
+          .from("borrow_schedules")
+          .insert({
+            request_id: requestIdValue,
+            item_id: approvedRequest.itemId,
+            item_title: approvedRequest.itemTitle,
+            borrower_id: approvedRequest.borrowerId || null,
+            borrower_name: approvedRequest.borrowerName,
+            lender_id: approvedRequest.ownerId || currentUser?.id || null,
+            lender_name: lenderName,
+            start_date: data.startDate,
+            end_date: data.endDate,
+            meeting_place: data.meetingPlace,
+            meeting_time: data.meetingTime,
+            status: "awaiting_handoff",
+            return_ready: false,
+            borrower_qr_code: borrowerCode,
+            lender_qr_code: lenderCode,
+          })
+          .select("*")
+          .single()
+
+        if (error) {
+          console.error("Failed to create schedule", error)
+          showBanner("Failed to create the schedule. Please try again.", "error")
+          return
+        }
+
+        const mapped = mapBorrowScheduleRecord(inserted)
+        setBorrowSchedules((prev) => {
+          const next = prev.filter((schedule) => schedule.id !== mapped.id)
+          return [...next, mapped]
+        })
+
+        if (currentUser?.id) {
+          void fetchBorrowSchedules(currentUser.id)
+        }
+
+        setBorrowRequests((prev) =>
+          prev.map((req) =>
+            req.id === approvedRequest.id
+              ? {
+                  ...req,
+                  preferredDate: data.startDate,
+                  returnDate: data.endDate,
+                  meetingPlace: data.meetingPlace,
+                  meetingTime: data.meetingTime,
+                }
+              : req,
+          ),
+        )
+
+        void updateItemQuantity(approvedRequest.itemId, -1)
+        setShowScheduleModal(false)
+        setScheduleDraftRequest(null)
+        showBanner(
+          `Schedule created for ${approvedRequest.borrowerName} from ${data.startDate} to ${data.endDate} at ${data.meetingTime} in ${data.meetingPlace}.`,
+          "success",
+        )
+      } catch (err) {
+        console.error("Unexpected error while creating schedule", err)
+        showBanner("An unexpected error occurred while creating the schedule.", "error")
+      }
+    })()
   }
 
   const handleListItemSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1732,6 +1845,17 @@ export default function Home() {
         return updatedSchedule
       }),
     )
+    if (qrType === "lender") {
+      void supabase
+        .from("borrow_schedules")
+        .update({ return_ready: true })
+        .eq("id", schedule.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Failed to flag schedule as return-ready", error)
+          }
+        })
+    }
     setSelectedQRCode({ schedule: updatedSchedule, type: qrType })
   }
 
@@ -1767,6 +1891,15 @@ export default function Home() {
             : sched,
         ),
       )
+      void supabase
+        .from("borrow_schedules")
+        .update({ status: "borrowed", return_ready: false })
+        .eq("id", selectedSchedule.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Failed to update schedule status to borrowed", error)
+          }
+        })
       showBanner(
         `Handoff confirmed for ${selectedSchedule.itemTitle}. Status updated to Borrowed.`,
         "success",
@@ -1778,6 +1911,15 @@ export default function Home() {
         ),
       )
       void updateItemQuantity(scheduleItemId, 1)
+      void supabase
+        .from("borrow_schedules")
+        .update({ status: "completed", return_ready: false })
+        .eq("id", selectedSchedule.id)
+        .then(({ error }) => {
+          if (error) {
+            console.error("Failed to mark schedule as completed", error)
+          }
+        })
       showBanner(`Item return confirmed. Transaction completed with ${selectedSchedule.borrowerName}.`, "success")
       const relatedRequest = borrowRequests.find(
         (request) =>
@@ -1806,6 +1948,15 @@ export default function Home() {
         sched.id === scheduleId ? { ...sched, status: "completed" as const, returnReady: false } : sched,
       ),
     )
+    void supabase
+      .from("borrow_schedules")
+      .update({ status: "completed", return_ready: false })
+      .eq("id", scheduleId)
+      .then(({ error }) => {
+        if (error) {
+          console.error("Failed to mark schedule complete", error)
+        }
+      })
     const completedSchedule = borrowSchedules.find((s) => s.id === scheduleId)
     if (completedSchedule) {
       void updateItemQuantity(completedSchedule.itemId, 1)
@@ -2117,7 +2268,7 @@ export default function Home() {
                   </h2>
                 </div>
                 <BorrowScheduleComponent
-                  schedules={borrowSchedules}
+                  schedules={scheduleCards}
                   currentUserName={currentUser?.name || ""}
                   onGenerateQR={handleGenerateQR}
                   onScanQR={handleScanQR}
