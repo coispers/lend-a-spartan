@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { X, Star } from "lucide-react"
@@ -10,24 +10,46 @@ interface RatingModalProps {
   onClose: () => void
   userName: string
   itemTitle: string
-  onSubmit: (data: { rating: number; review: string }) => void
+  initialRating?: number | null
+  initialReview?: string | null
+  onSubmit: (data: { rating: number; review: string }) => Promise<void> | void
 }
 
-export default function RatingModal({ isOpen, onClose, userName, itemTitle, onSubmit }: RatingModalProps) {
-  const [rating, setRating] = useState(0)
+export default function RatingModal({
+  isOpen,
+  onClose,
+  userName,
+  itemTitle,
+  initialRating = null,
+  initialReview = "",
+  onSubmit,
+}: RatingModalProps) {
+  const [rating, setRating] = useState(initialRating ?? 0)
   const [hoverRating, setHoverRating] = useState(0)
-  const [review, setReview] = useState("")
+  const [review, setReview] = useState(initialReview ?? "")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) return
+    setRating(initialRating ?? 0)
+    setHoverRating(0)
+    setReview(initialReview ?? "")
+  }, [initialRating, initialReview, isOpen])
 
   if (!isOpen) return null
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (rating === 0) {
       alert("Please select a rating")
       return
     }
-    onSubmit({ rating, review })
-    setRating(0)
-    setReview("")
+    if (isSubmitting) return
+    setIsSubmitting(true)
+    try {
+  await Promise.resolve(onSubmit({ rating, review: review.trim() }))
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -77,8 +99,12 @@ export default function RatingModal({ isOpen, onClose, userName, itemTitle, onSu
           </div>
 
           <div className="space-y-2">
-            <Button onClick={handleSubmit} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
-              Submit Rating
+            <Button
+              onClick={handleSubmit}
+              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? "Submitting..." : "Submit Rating"}
             </Button>
             <Button variant="outline" onClick={onClose} className="w-full bg-transparent">
               Cancel

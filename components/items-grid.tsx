@@ -7,9 +7,21 @@ interface ItemsGridProps {
   items: any[]
   onItemClick: (item: any) => void
   isLoading?: boolean
+  currentUserId?: string | null
+  deletingItemId?: string | null
+  onDeleteItem?: (item: any) => void
+  removingItemIds?: Set<string>
 }
 
-export default function ItemsGrid({ items, onItemClick, isLoading }: ItemsGridProps) {
+export default function ItemsGrid({
+  items,
+  onItemClick,
+  isLoading,
+  currentUserId,
+  deletingItemId,
+  onDeleteItem,
+  removingItemIds,
+}: ItemsGridProps) {
   if (isLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -31,9 +43,21 @@ export default function ItemsGrid({ items, onItemClick, isLoading }: ItemsGridPr
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-      {items.map((item) => (
-        <ItemCard key={item.id} item={item} onClick={() => onItemClick(item)} />
-      ))}
+      {items.map((item) => {
+        const isOwner = currentUserId && item.ownerId === currentUserId
+        const isRemoving = removingItemIds?.has(item.id)
+        return (
+          <ItemCard
+            key={item.id}
+            item={item}
+            onClick={() => onItemClick(item)}
+            canDelete={Boolean(isOwner && onDeleteItem)}
+            onDelete={isOwner && onDeleteItem ? () => onDeleteItem(item) : undefined}
+            isDeleting={deletingItemId === item.id}
+            isRemoving={Boolean(isRemoving)}
+          />
+        )
+      })}
     </div>
   )
 }

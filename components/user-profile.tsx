@@ -15,13 +15,17 @@ interface UserReview {
 
 interface UserProfileProps {
   userName: string
-  rating: number
+  rating: number | null
   totalReviews: number
   itemsLent: number
   itemsBorrowed: number
   joinDate: Date
   reviews: UserReview[]
   trustScore: number
+  lenderRating: number | null
+  lenderReviewCount: number
+  borrowerRating: number | null
+  borrowerReviewCount: number
 }
 
 export default function UserProfile({
@@ -33,6 +37,10 @@ export default function UserProfile({
   joinDate,
   reviews,
   trustScore,
+  lenderRating,
+  lenderReviewCount,
+  borrowerRating,
+  borrowerReviewCount,
 }: UserProfileProps) {
   const getTrustBadge = (score: number) => {
     if (score >= 90) return { label: "Highly Trusted", color: "bg-green-100 text-green-800" }
@@ -42,6 +50,8 @@ export default function UserProfile({
   }
 
   const trustBadge = getTrustBadge(trustScore)
+  const formatRatingValue = (value: number | null) => (value !== null ? value.toFixed(1) : "—")
+  const formatReviewCount = (count: number) => `${count} review${count === 1 ? "" : "s"}`
 
   return (
     <div className="space-y-6">
@@ -55,13 +65,34 @@ export default function UserProfile({
           <Badge className={trustBadge.color}>{trustBadge.label}</Badge>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
           <div className="text-center">
             <div className="flex items-center justify-center gap-1 mb-1">
               <Star size={20} className="fill-accent text-accent" />
-              <span className="text-2xl font-bold text-foreground">{rating.toFixed(1)}</span>
+              <span className="text-2xl font-bold text-foreground">{formatRatingValue(rating)}</span>
             </div>
-            <p className="text-xs text-muted-foreground">{totalReviews} reviews</p>
+            <p className="text-xs text-muted-foreground">{formatReviewCount(totalReviews)}</p>
+          </div>
+          <div className="text-center">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <Star size={18} className="text-primary" />
+              <span className="text-xl font-semibold text-foreground">{formatRatingValue(lenderRating)}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">As lender • {formatReviewCount(lenderReviewCount)}</p>
+          </div>
+          <div className="text-center">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <Star size={18} className="text-primary" />
+              <span className="text-xl font-semibold text-foreground">{formatRatingValue(borrowerRating)}</span>
+            </div>
+            <p className="text-xs text-muted-foreground">As borrower • {formatReviewCount(borrowerReviewCount)}</p>
+          </div>
+          <div className="text-center">
+            <div className="flex items-center justify-center gap-1 mb-1">
+              <TrendingUp size={20} className="text-primary" />
+              <span className="text-2xl font-bold text-foreground">{trustScore}%</span>
+            </div>
+            <p className="text-xs text-muted-foreground">Trust Score</p>
           </div>
           <div className="text-center">
             <p className="text-2xl font-bold text-foreground">{itemsLent}</p>
@@ -70,13 +101,6 @@ export default function UserProfile({
           <div className="text-center">
             <p className="text-2xl font-bold text-foreground">{itemsBorrowed}</p>
             <p className="text-xs text-muted-foreground">Items Borrowed</p>
-          </div>
-          <div className="text-center">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <TrendingUp size={20} className="text-primary" />
-              <span className="text-2xl font-bold text-foreground">{trustScore}%</span>
-            </div>
-            <p className="text-xs text-muted-foreground">Trust Score</p>
           </div>
         </div>
       </Card>

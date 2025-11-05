@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CheckCircle, XCircle, Clock, MessageSquare, User, X } from "lucide-react"
+import { CheckCircle, XCircle, Clock, MessageSquare, User, X, Star } from "lucide-react"
+
+type TabValue = "toRate" | "pending" | "approved" | "completed" | "rejected"
 
 interface BorrowRequest {
   id: string
@@ -24,6 +26,12 @@ interface BorrowRequest {
   lenderName: string
   lenderEmail: string | null
   decisionMessage?: string | null
+  borrowerFeedbackRating: number | null
+  borrowerFeedbackMessage?: string | null
+  borrowerFeedbackAt?: Date | null
+  lenderFeedbackRating: number | null
+  lenderFeedbackMessage?: string | null
+  lenderFeedbackAt?: Date | null
 }
 
 interface RequestsDashboardProps {
@@ -32,6 +40,7 @@ interface RequestsDashboardProps {
   onApprove: (requestId: string, responseMessage?: string) => void
   onReject: (requestId: string, responseMessage?: string) => void
   onComplete: (requestId: string) => void
+  onOpenRating: (request: BorrowRequest, role: "borrower" | "lender") => void
 }
 
 export default function RequestsDashboard({
@@ -40,6 +49,7 @@ export default function RequestsDashboard({
   onApprove,
   onReject,
   onComplete,
+  onOpenRating,
 }: RequestsDashboardProps) {
   const [selectedRequest, setSelectedRequest] = useState<BorrowRequest | null>(null)
   const [decisionMessage, setDecisionMessage] = useState("")
@@ -51,6 +61,12 @@ export default function RequestsDashboard({
     }
     setDecisionMessage(selectedRequest.decisionMessage ?? "")
   }, [selectedRequest])
+
+  const isAwaitingFeedback = (request: BorrowRequest) =>
+    request.status === "completed" &&
+    (currentUserRole === "borrower" ? !request.borrowerFeedbackRating : !request.lenderFeedbackRating)
+
+  const toRateRequests = useMemo(() => requests.filter((req) => isAwaitingFeedback(req)), [requests, currentUserRole])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -83,7 +99,43 @@ export default function RequestsDashboard({
   const completedRequests = requests.filter((r) => r.status === "completed")
   const rejectedRequests = requests.filter((r) => r.status === "rejected")
 
-  const RequestCard = ({ request }: { request: BorrowRequest }) => (
+  const [activeTab, setActiveTab] = useState<TabValue>(() => (toRateRequests.length > 0 ? "toRate" : "pending"))
+
+  const renderStars = (value: number) => (
+    <div className="flex gap-1 text-accent">
+      {[1, 2, 3, 4, 5].map((star) => (
+        <Star key={star} size={16} className={star <= value ? "fill-accent text-accent" : "text-muted-foreground"} />
+      ))}
+    </div>
+  )
+
+  const formatDate = (value?: Date | null) => (value ? value.toLocaleDateString() : null)
+
+  const renderFeedbackBlock = (
+    rating: number | null,
+    message: string | null | undefined,
+    timestamp: Date | null | undefined,
+    emptyLabel: string,
+  ) => {
+    if (!rating) {
+      return <p className="text-muted-foreground">{emptyLabel}</p>
+    }
+    const formatted = formatDate(timestamp)
+    return (
+      <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          {renderStars(rating)}
+          {formatted && <span className="text-xs text-muted-foreground">{formatted}</span>}
+        </div>
+        {message && <p className="text-sm text-foreground break-words">{message}</p>}
+      </div>
+    )
+  }
+
+  const RequestCard = ({ request }: { request: BorrowRequest }) => {
+    const showRateButton = isAwaitingFeedback(request)
+
+    return (
     <Card
       className="p-3 md:p-4 border border-border hover:shadow-md transition-shadow cursor-pointer"
       onClick={() => setSelectedRequest(request)}
@@ -102,14 +154,28 @@ export default function RequestsDashboard({
                 {currentUserRole === "lender" ? `From: ${request.borrowerName}` : `To: ${request.lenderName}`}
               </p>
             </div>
-            <Badge className={`${getStatusColor(request.status)} text-xs flex-shrink-0`}>
-              <span className="flex items-center gap-1">
-                {getStatusIcon(request.status)}
-                <span className="hidden sm:inline">
-                  {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+            <div className="flex flex-col items-end gap-1">
+              <Badge className={`${getStatusColor(request.status)} text-xs flex-shrink-0`}>
+                <span className="flex items-center gap-1">
+                  {getStatusIcon(request.status)}
+                  <span className="hidden sm:inline">
+                    {request.status.charAt(0).toUpperCase() + request.status.slice(1)}
+                  </span>
                 </span>
-              </span>
-            </Badge>
+              </Badge>
+              {showRateButton && (
+                <Button
+                  size="sm"
+                  className="h-7 px-3 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onOpenRating(request, currentUserRole)
+                  }}
+                >
+                  Rate now
+                </Button>
+              )}
+            </div>
           </div>
           <p className="text-xs text-muted-foreground">
             Requested: {new Date(request.requestDate).toLocaleDateString()}
@@ -118,12 +184,17 @@ export default function RequestsDashboard({
         </div>
       </div>
     </Card>
-  )
+    )
+  }
 
   return (
     <div className="space-y-4 md:space-y-6">
-      <Tabs defaultValue="pending" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 h-auto">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className="w-full">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 h-auto">
+          <TabsTrigger value="toRate" className="text-xs md:text-sm py-2">
+            <span className="hidden sm:inline">To Rate</span>
+            <span className="sm:hidden">R</span> ({toRateRequests.length})
+          </TabsTrigger>
           <TabsTrigger value="pending" className="text-xs md:text-sm py-2">
             <span className="hidden sm:inline">Pending</span>
             <span className="sm:hidden">P</span> ({pendingRequests.length})
@@ -141,6 +212,14 @@ export default function RequestsDashboard({
             <span className="sm:hidden">R</span> ({rejectedRequests.length})
           </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="toRate" className="space-y-2 md:space-y-3 mt-3 md:mt-4">
+          {toRateRequests.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6 md:py-8">Nothing waiting for your feedback.</p>
+          ) : (
+            toRateRequests.map((request) => <RequestCard key={request.id} request={request} />)
+          )}
+        </TabsContent>
 
         <TabsContent value="pending" className="space-y-2 md:space-y-3 mt-3 md:mt-4">
           {pendingRequests.length === 0 ? (
@@ -240,6 +319,44 @@ export default function RequestsDashboard({
                   </div>
                 )}
               </div>
+
+              {selectedRequest.status === "completed" && (
+                <div className="space-y-3 border-t border-border pt-4">
+                  <h3 className="text-sm font-semibold text-foreground">Feedback</h3>
+                  <div className="space-y-4 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Borrower → Lender</p>
+                      {renderFeedbackBlock(
+                        selectedRequest.borrowerFeedbackRating,
+                        selectedRequest.borrowerFeedbackMessage,
+                        selectedRequest.borrowerFeedbackAt,
+                        "Awaiting borrower feedback.",
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">Lender → Borrower</p>
+                      {renderFeedbackBlock(
+                        selectedRequest.lenderFeedbackRating,
+                        selectedRequest.lenderFeedbackMessage,
+                        selectedRequest.lenderFeedbackAt,
+                        "Awaiting lender feedback.",
+                      )}
+                    </div>
+                  </div>
+
+                  {isAwaitingFeedback(selectedRequest) && (
+                    <Button
+                      onClick={() => {
+                        onOpenRating(selectedRequest, currentUserRole)
+                        setSelectedRequest(null)
+                      }}
+                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground text-sm h-10"
+                    >
+                      Rate {currentUserRole === "borrower" ? selectedRequest.lenderName : selectedRequest.borrowerName}
+                    </Button>
+                  )}
+                </div>
+              )}
 
               {currentUserRole === "lender" && selectedRequest.status === "pending" && (
                 <div className="space-y-2">

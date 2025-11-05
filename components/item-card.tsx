@@ -1,24 +1,50 @@
 "use client"
 
+import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import { Star, MapPin, Package } from "lucide-react"
+import { Star, MapPin, Package, Trash2, Loader2 } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface ItemCardProps {
   item: any
   onClick: () => void
+  canDelete?: boolean
+  onDelete?: () => void
+  isDeleting?: boolean
+  isRemoving?: boolean
 }
 
-export default function ItemCard({ item, onClick }: ItemCardProps) {
+export default function ItemCard({ item, onClick, canDelete, onDelete, isDeleting, isRemoving }: ItemCardProps) {
   return (
     <Card
       onClick={onClick}
-      className="overflow-hidden cursor-pointer hover:shadow-md transition-shadow border border-border"
+      className={cn(
+        "overflow-hidden cursor-pointer border border-border transition-all duration-300 ease-out hover:shadow-md",
+        (isDeleting || isRemoving) && "pointer-events-none opacity-60",
+        isRemoving && "scale-[0.97] translate-y-2 opacity-0"
+      )}
     >
       <div className="relative h-48 bg-muted">
         <img src={item.image || "/placeholder.svg"} alt={item.title} className="w-full h-full object-cover" />
         <div className="absolute top-3 right-3 bg-primary text-primary-foreground px-2.5 py-1 rounded text-xs font-medium">
           {item.condition}
         </div>
+        {canDelete && onDelete && (
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            className="absolute top-3 left-3 h-8 w-8 rounded-full bg-destructive/90 hover:bg-destructive"
+            disabled={isDeleting}
+            onClick={(event) => {
+              event.stopPropagation()
+              onDelete()
+            }}
+          >
+            {isDeleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+            <span className="sr-only">Delete listing</span>
+          </Button>
+        )}
       </div>
 
       <div className="p-5">
