@@ -59,9 +59,14 @@ export default function RatingModal({
           <X size={24} />
         </button>
 
-        <h2 className="text-2xl font-bold mb-2 text-foreground">Rate Transaction</h2>
-        <p className="text-muted-foreground mb-1">{itemTitle}</p>
-        <p className="text-sm text-muted-foreground mb-6">with {userName}</p>
+        <h2 className="text-2xl font-bold mb-4 text-foreground">Rate Transaction</h2>
+        <div className="mb-6 space-y-2">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Item</p>
+          <p className="text-2xl font-semibold text-foreground leading-snug">{itemTitle}</p>
+          <p className="text-base text-muted-foreground">
+            with <span className="font-semibold text-foreground">{userName}</span>
+          </p>
+        </div>
 
         <div className="space-y-4">
           <div>

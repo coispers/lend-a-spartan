@@ -54,6 +54,18 @@ export default function RequestsDashboard({
   const [selectedRequest, setSelectedRequest] = useState<BorrowRequest | null>(null)
   const [decisionMessage, setDecisionMessage] = useState("")
 
+  const getFirstName = (value?: string | null) => {
+    if (!value) return ""
+    const trimmed = value.trim()
+    if (!trimmed) return ""
+    return trimmed.split(/\s+/)[0]
+  }
+
+  const borrowerFirstName = selectedRequest ? getFirstName(selectedRequest.borrowerName) || "Borrower" : "Borrower"
+  const lenderFirstName = selectedRequest ? getFirstName(selectedRequest.lenderName) || "Lender" : "Lender"
+  const borrowerToLenderLabel = `${borrowerFirstName} (borrower) -> ${lenderFirstName} (lender)`
+  const lenderToBorrowerLabel = `${lenderFirstName} (lender) -> ${borrowerFirstName} (borrower)`
+
   useEffect(() => {
     if (!selectedRequest) {
       setDecisionMessage("")
@@ -325,7 +337,7 @@ export default function RequestsDashboard({
                   <h3 className="text-sm font-semibold text-foreground">Feedback</h3>
                   <div className="space-y-4 text-sm">
                     <div>
-                      <p className="text-xs text-muted-foreground">Borrower → Lender</p>
+                      <p className="text-xs text-muted-foreground">{borrowerToLenderLabel}</p>
                       {renderFeedbackBlock(
                         selectedRequest.borrowerFeedbackRating,
                         selectedRequest.borrowerFeedbackMessage,
@@ -334,7 +346,7 @@ export default function RequestsDashboard({
                       )}
                     </div>
                     <div>
-                      <p className="text-xs text-muted-foreground">Lender → Borrower</p>
+                      <p className="text-xs text-muted-foreground">{lenderToBorrowerLabel}</p>
                       {renderFeedbackBlock(
                         selectedRequest.lenderFeedbackRating,
                         selectedRequest.lenderFeedbackMessage,

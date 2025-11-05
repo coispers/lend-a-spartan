@@ -1,15 +1,25 @@
 "use client"
 
+import { useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { TrendingUp, Clock, CheckCircle, Star } from "lucide-react"
+
+type DashboardRole = "combined" | "lender" | "borrower"
+
+interface DashboardMetrics {
+  pendingRequests: number
+  activeBorrowings: number
+  completedTransactions: number
+  rating: number | null
+  totalReviews: number
+}
 
 interface DashboardProps {
   currentUser: any
-  pendingRequests: number
-  activeSchedules: number
-  completedTransactions: number
+  metricsByRole: Record<DashboardRole, DashboardMetrics>
   recentActivity: Array<{
     id: string
     type: "request" | "approval" | "completion" | "rating"
@@ -23,12 +33,30 @@ interface DashboardProps {
 
 export default function Dashboard({
   currentUser,
-  pendingRequests,
-  activeSchedules,
-  completedTransactions,
+  metricsByRole,
   recentActivity,
   onNavigate,
 }: DashboardProps) {
+  const [roleFilter, setRoleFilter] = useState<DashboardRole>("combined")
+
+  const roleLabels: Record<DashboardRole, string> = {
+    combined: "All Roles",
+    lender: "As Lender",
+    borrower: "As Borrower",
+  }
+
+  const metrics = metricsByRole[roleFilter] ?? metricsByRole.combined
+  const ratingValue =
+    metrics.totalReviews > 0 && metrics.rating !== null
+      ? metrics.rating.toFixed(2)
+      : metrics.totalReviews > 0
+        ? "0.00"
+        : "—"
+  const ratingStarClass =
+    metrics.totalReviews > 0 && metrics.rating !== null
+      ? "fill-accent text-accent"
+      : "text-muted-foreground"
+
   const displayFirstName =
     currentUser?.firstName ||
     (typeof currentUser?.name === "string" ? currentUser.name.split(" ")[0] : "Spartan")
@@ -57,12 +85,28 @@ export default function Dashboard({
         <p className="text-sm md:text-base text-muted-foreground">Here's your activity overview</p>
       </div>
 
+      <Tabs value={roleFilter} onValueChange={(value) => setRoleFilter(value as DashboardRole)}>
+        <TabsList className="grid w-full grid-cols-3 md:inline-flex md:w-auto md:gap-2 md:h-10">
+          <TabsTrigger value="combined" className="text-xs md:text-sm py-2">
+            All Roles
+          </TabsTrigger>
+          <TabsTrigger value="lender" className="text-xs md:text-sm py-2">
+            As Lender
+          </TabsTrigger>
+          <TabsTrigger value="borrower" className="text-xs md:text-sm py-2">
+            As Borrower
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6">
         <Card className="p-3 md:p-6 border border-border hover:border-primary/30 transition-colors">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">Pending Requests</p>
-              <p className="text-2xl md:text-3xl font-bold text-foreground">{pendingRequests}</p>
+              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">
+                Pending Requests · {roleLabels[roleFilter]}
+              </p>
+              <p className="text-2xl md:text-3xl font-bold text-foreground">{metrics.pendingRequests}</p>
             </div>
             <Clock size={16} className="md:w-5 md:h-5 text-primary flex-shrink-0" />
           </div>
@@ -71,8 +115,10 @@ export default function Dashboard({
         <Card className="p-3 md:p-6 border border-border hover:border-primary/30 transition-colors">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">Active Borrowings</p>
-              <p className="text-2xl md:text-3xl font-bold text-foreground">{activeSchedules}</p>
+              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">
+                Active Borrowings · {roleLabels[roleFilter]}
+              </p>
+              <p className="text-2xl md:text-3xl font-bold text-foreground">{metrics.activeBorrowings}</p>
             </div>
             <TrendingUp size={16} className="md:w-5 md:h-5 text-primary flex-shrink-0" />
           </div>
@@ -81,8 +127,10 @@ export default function Dashboard({
         <Card className="p-3 md:p-6 border border-border hover:border-primary/30 transition-colors">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">Completed</p>
-              <p className="text-2xl md:text-3xl font-bold text-foreground">{completedTransactions}</p>
+              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">
+                Completed · {roleLabels[roleFilter]}
+              </p>
+              <p className="text-2xl md:text-3xl font-bold text-foreground">{metrics.completedTransactions}</p>
             </div>
             <CheckCircle size={16} className="md:w-5 md:h-5 text-primary flex-shrink-0" />
           </div>
@@ -91,11 +139,16 @@ export default function Dashboard({
         <Card className="p-3 md:p-6 border border-border hover:border-primary/30 transition-colors">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">Your Rating</p>
+              <p className="text-xs md:text-sm text-muted-foreground mb-1 md:mb-2">
+                Your Rating · {roleLabels[roleFilter]}
+              </p>
               <div className="flex items-center gap-1">
-                <p className="text-2xl md:text-3xl font-bold text-foreground">{currentUser.rating}</p>
-                <Star size={14} className="md:w-4 md:h-4 fill-accent text-accent flex-shrink-0" />
+                <p className="text-2xl md:text-3xl font-bold text-foreground">{ratingValue}</p>
+                <Star size={14} className={`md:w-4 md:h-4 flex-shrink-0 ${ratingStarClass}`} />
               </div>
+              <p className="text-[11px] md:text-xs text-muted-foreground mt-1">
+                {metrics.totalReviews} review{metrics.totalReviews === 1 ? "" : "s"}
+              </p>
             </div>
           </div>
         </Card>

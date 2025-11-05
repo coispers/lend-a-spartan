@@ -54,7 +54,9 @@ interface BorrowSchedule {
   itemId: string
   itemTitle: string
   borrowerName: string
+  borrowerId: string | null
   lenderName: string
+  lenderId: string | null
   borrowerQRCode: string
   lenderQRCode: string
   startDate: string
@@ -114,6 +116,16 @@ type ActivityEntry = {
 }
 
 type RatingDirection = "borrowerToLender" | "lenderToBorrower"
+
+type DashboardRole = "combined" | "lender" | "borrower"
+
+interface DashboardMetricSummary {
+  pendingRequests: number
+  activeBorrowings: number
+  completedTransactions: number
+  rating: number | null
+  totalReviews: number
+}
 
 interface RatingContextState {
   itemTitle: string
@@ -329,7 +341,9 @@ export default function Home() {
         itemId: "1",
         itemTitle: "Laptop Stand",
         borrowerName: "Alex Johnson",
+        borrowerId: null,
         lenderName: "Juan Dela Cruz",
+        lenderId: null,
         borrowerQRCode: makeCode("borrower", "Alex Johnson", 0),
         lenderQRCode: makeCode("lender", "Juan Dela Cruz", 0),
         startDate: "2025-10-20",
@@ -342,7 +356,9 @@ export default function Home() {
         itemId: "2",
         itemTitle: "Calculus Textbook",
         borrowerName: "Sarah Lee",
+        borrowerId: null,
         lenderName: "Maria Santos",
+        lenderId: null,
         borrowerQRCode: makeCode("borrower", "Sarah Lee", 1),
         lenderQRCode: makeCode("lender", "Maria Santos", 1),
         startDate: "2025-11-10",
@@ -355,7 +371,9 @@ export default function Home() {
         itemId: "3",
         itemTitle: "DSLR Camera",
         borrowerName: "Miguel Rivera",
+        borrowerId: null,
         lenderName: "Carla Gomez",
+        lenderId: null,
         borrowerQRCode: makeCode("borrower", "Miguel Rivera", 2),
         lenderQRCode: makeCode("lender", "Carla Gomez", 2),
         startDate: "2025-10-25",
@@ -368,7 +386,9 @@ export default function Home() {
         itemId: "4",
         itemTitle: "Wireless Microphone",
         borrowerName: "Jenna Brooks",
+        borrowerId: null,
         lenderName: "Noel Tan",
+        lenderId: null,
         borrowerQRCode: makeCode("borrower", "Jenna Brooks", 3),
         lenderQRCode: makeCode("lender", "Noel Tan", 3),
         startDate: "2025-09-15",
@@ -381,7 +401,9 @@ export default function Home() {
         itemId: "5",
         itemTitle: "Graphic Tablet",
         borrowerName: "Harper Kim",
+        borrowerId: null,
         lenderName: "Luis Fernandez",
+        lenderId: null,
         borrowerQRCode: makeCode("borrower", "Harper Kim", 4),
         lenderQRCode: makeCode("lender", "Luis Fernandez", 4),
         startDate: "2025-08-28",
@@ -881,6 +903,112 @@ export default function Home() {
     [lenderRequestsForCurrentUser],
   )
 
+  const dashboardMetrics = useMemo<Record<DashboardRole, DashboardMetricSummary>>(() => {
+    const formatAverage = (average: number | null) => (average === null ? null : Number(average.toFixed(2)))
+
+    const baseMetrics: Record<DashboardRole, DashboardMetricSummary> = {
+      combined: {
+        pendingRequests: 0,
+        activeBorrowings: 0,
+        completedTransactions: 0,
+        rating: formatAverage(ratingStats.overallAverage),
+        totalReviews: ratingStats.totalCount,
+      },
+      lender: {
+        pendingRequests: 0,
+        activeBorrowings: 0,
+        completedTransactions: 0,
+        rating: formatAverage(ratingStats.asLender.average),
+        totalReviews: ratingStats.asLender.count,
+      },
+      borrower: {
+        pendingRequests: 0,
+        activeBorrowings: 0,
+        completedTransactions: 0,
+        rating: formatAverage(ratingStats.asBorrower.average),
+        totalReviews: ratingStats.asBorrower.count,
+      },
+    }
+
+    if (!currentUser) {
+      return baseMetrics
+    }
+
+    const normalize = (value?: string | null) => (value ? value.trim().toLowerCase() : "")
+
+    const nameTokens = new Set<string>()
+    const addName = (value?: string | null) => {
+      const normalized = normalize(value)
+      if (normalized) {
+        nameTokens.add(normalized)
+      }
+    }
+
+    addName(currentUser.name)
+    addName(currentUser.fullName)
+    addName(
+      currentUser.firstName && currentUser.lastName ? `${currentUser.firstName} ${currentUser.lastName}` : null,
+    )
+
+    const currentUserId = currentUser.id ? String(currentUser.id) : null
+    const matchesUser = (candidateId?: string | null, candidateName?: string | null) => {
+      if (currentUserId && candidateId && String(candidateId) === currentUserId) {
+        return true
+      }
+      const normalized = normalize(candidateName)
+      return normalized ? nameTokens.has(normalized) : false
+    }
+
+    const borrowerPending = borrowerRequestsForCurrentUser.filter((req) => req.status === "pending").length
+    const lenderPending = lenderRequestsForCurrentUser.filter((req) => req.status === "pending").length
+
+    baseMetrics.borrower.pendingRequests = borrowerPending
+    baseMetrics.lender.pendingRequests = lenderPending
+    baseMetrics.combined.pendingRequests = borrowerPending + lenderPending
+
+    let borrowerActive = 0
+    let lenderActive = 0
+    let borrowerCompleted = 0
+    let lenderCompleted = 0
+
+    borrowRequests.forEach((request) => {
+      const isBorrower = matchesUser(request.borrowerId, request.borrowerName)
+      const isLender = matchesUser(request.ownerId, request.lenderName)
+      if (!isBorrower && !isLender) return
+
+      if (request.status === "approved") {
+        if (isBorrower) borrowerActive += 1
+        if (isLender) lenderActive += 1
+      }
+
+      if (request.status === "completed") {
+        if (isBorrower) borrowerCompleted += 1
+        if (isLender) lenderCompleted += 1
+      }
+    })
+
+    baseMetrics.borrower.activeBorrowings = borrowerActive
+    baseMetrics.lender.activeBorrowings = lenderActive
+    baseMetrics.combined.activeBorrowings = borrowerActive + lenderActive
+
+    baseMetrics.borrower.completedTransactions = borrowerCompleted
+    baseMetrics.lender.completedTransactions = lenderCompleted
+    baseMetrics.combined.completedTransactions = borrowerCompleted + lenderCompleted
+
+    return baseMetrics
+  }, [
+  borrowRequests,
+    borrowerRequestsForCurrentUser,
+    lenderRequestsForCurrentUser,
+    currentUser,
+    ratingStats.asBorrower.average,
+    ratingStats.asBorrower.count,
+    ratingStats.asLender.average,
+    ratingStats.asLender.count,
+    ratingStats.overallAverage,
+    ratingStats.totalCount,
+  ])
+
   const baseRecentActivity = useMemo<ActivityEntry[]>(
     () => [
       {
@@ -1315,7 +1443,9 @@ export default function Home() {
         itemId: approvedRequest.itemId,
         itemTitle: approvedRequest.itemTitle,
         borrowerName: approvedRequest.borrowerName,
+        borrowerId: approvedRequest.borrowerId || null,
         lenderName,
+        lenderId: approvedRequest.ownerId || currentUser?.id || null,
         borrowerQRCode: `borrower-${borrowerSlug}-${timestamp}`,
         lenderQRCode: `lender-${lenderSlug}-${timestamp}`,
         startDate: data.startDate,
@@ -1785,13 +1915,7 @@ export default function Home() {
             {userMode === "dashboard" ? (
               <Dashboard
                 currentUser={currentUser}
-                pendingRequests={pendingLenderRequests}
-                activeSchedules={
-                  borrowSchedules.filter(
-                    (s) => s.status === "awaiting_handoff" || s.status === "borrowed",
-                  ).length
-                }
-                completedTransactions={borrowSchedules.filter((s) => s.status === "completed").length}
+                metricsByRole={dashboardMetrics}
                 recentActivity={recentActivity}
                 onNavigate={setUserMode}
               />

@@ -9,7 +9,9 @@ interface BorrowSchedule {
   itemId: string
   itemTitle: string
   borrowerName: string
+  borrowerId: string | null
   lenderName: string
+  lenderId: string | null
   borrowerQRCode: string
   lenderQRCode: string
   startDate: string
