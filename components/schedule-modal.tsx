@@ -1,23 +1,45 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
-import { X, Calendar } from "lucide-react"
+import { X, Calendar, MapPin, Clock } from "lucide-react"
 
 interface ScheduleModalProps {
   isOpen: boolean
   onClose: () => void
   itemTitle: string
   borrowerName: string
-  onSubmit: (data: { startDate: string; endDate: string }) => void
+  onSubmit: (data: {
+    startDate: string
+    endDate: string
+    meetingPlace: string
+    meetingTime: string
+  }) => void
+  defaults?: {
+    startDate?: string
+    endDate?: string
+    meetingPlace?: string
+    meetingTime?: string
+  }
 }
 
-export default function ScheduleModal({ isOpen, onClose, itemTitle, borrowerName, onSubmit }: ScheduleModalProps) {
+export default function ScheduleModal({ isOpen, onClose, itemTitle, borrowerName, onSubmit, defaults }: ScheduleModalProps) {
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
+  const [meetingPlace, setMeetingPlace] = useState("")
+  const [meetingTime, setMeetingTime] = useState("")
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (isOpen) {
+      setStartDate(defaults?.startDate ?? "")
+      setEndDate(defaults?.endDate ?? "")
+      setMeetingPlace(defaults?.meetingPlace ?? "")
+      setMeetingTime(defaults?.meetingTime ?? "")
+    }
+  }, [defaults, isOpen])
 
   if (!isOpen) return null
 
@@ -29,14 +51,27 @@ export default function ScheduleModal({ isOpen, onClose, itemTitle, borrowerName
       return
     }
 
-    if (new Date(startDate) >= new Date(endDate)) {
-      setError("End date must be after start date")
+    if (new Date(startDate) > new Date(endDate)) {
+      setError("End date must be on or after the start date")
       return
     }
 
-    onSubmit({ startDate, endDate })
-    setStartDate("")
-    setEndDate("")
+    if (!meetingPlace.trim()) {
+      setError("Please provide a meeting place")
+      return
+    }
+
+    if (!meetingTime) {
+      setError("Please select a meeting time")
+      return
+    }
+
+    onSubmit({
+      startDate,
+      endDate,
+      meetingPlace: meetingPlace.trim(),
+      meetingTime,
+    })
   }
 
   return (
@@ -75,6 +110,32 @@ export default function ScheduleModal({ isOpen, onClose, itemTitle, borrowerName
               onChange={(e) => setEndDate(e.target.value)}
               className="border border-border"
             />
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                <MapPin size={16} />
+                Meeting Place
+              </label>
+              <Input
+                type="text"
+                value={meetingPlace}
+                onChange={(e) => setMeetingPlace(e.target.value)}
+                placeholder="e.g. Library Atrium"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                <Clock size={16} />
+                Meeting Time
+              </label>
+              <Input
+                type="time"
+                value={meetingTime}
+                onChange={(e) => setMeetingTime(e.target.value)}
+              />
+            </div>
           </div>
 
           {error && <div className="p-3 bg-red-100 text-red-800 rounded text-sm">{error}</div>}

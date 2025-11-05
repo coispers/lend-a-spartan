@@ -35,6 +35,9 @@ interface BorrowRequest {
   borrowerEmail: string
   requestDate: Date
   preferredDate: string
+  returnDate: string | null
+  meetingPlace: string | null
+  meetingTime: string | null
   message: string
   status: "pending" | "approved" | "rejected" | "completed"
   ownerId: string | null
@@ -61,6 +64,8 @@ interface BorrowSchedule {
   lenderQRCode: string
   startDate: string
   endDate: string
+  meetingPlace: string | null
+  meetingTime: string | null
   status: "scheduled" | "awaiting_handoff" | "borrowed" | "overdue" | "completed"
   returnReady: boolean
 }
@@ -137,7 +142,7 @@ interface RatingContextState {
   existingReview?: string | null
 }
 //set to true to enable email notifications. 
-const ENABLE_EMAIL_NOTIFICATIONS = false
+const ENABLE_EMAIL_NOTIFICATIONS = true
 
 const summarizeSupabaseError = (error: unknown): string | null => {
   if (!error) {
@@ -200,8 +205,32 @@ export default function Home() {
   const [lenderNotification, setLenderNotification] = useState<string | null>(null)
   const previousRequestIdsRef = useRef<Set<string>>(new Set())
   const profileRatingSyncRef = useRef<number | null | undefined>(undefined)
+  const [scheduleDraftRequest, setScheduleDraftRequest] = useState<BorrowRequest | null>(null)
 
   const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([])
+
+  const scheduleModalContext = useMemo(() => {
+    if (!scheduleDraftRequest) {
+      return null
+    }
+
+    const coerce = (value?: string | null) => {
+      if (!value) return ""
+      const trimmed = value.trim()
+      return trimmed
+    }
+
+    return {
+      itemTitle: scheduleDraftRequest.itemTitle,
+      borrowerName: scheduleDraftRequest.borrowerName,
+      defaults: {
+        startDate: coerce(scheduleDraftRequest.preferredDate),
+        endDate: coerce(scheduleDraftRequest.returnDate) || coerce(scheduleDraftRequest.preferredDate),
+        meetingPlace: coerce(scheduleDraftRequest.meetingPlace),
+        meetingTime: coerce(scheduleDraftRequest.meetingTime),
+      },
+    }
+  }, [scheduleDraftRequest])
 
   const receivedReviews = useMemo<UserReview[]>(() => {
     if (!currentUser?.id) return []
@@ -348,6 +377,8 @@ export default function Home() {
         lenderQRCode: makeCode("lender", "Juan Dela Cruz", 0),
         startDate: "2025-10-20",
         endDate: "2025-10-27",
+        meetingPlace: "Library Atrium",
+        meetingTime: "10:00",
         status: "awaiting_handoff",
         returnReady: false,
       },
@@ -363,6 +394,8 @@ export default function Home() {
         lenderQRCode: makeCode("lender", "Maria Santos", 1),
         startDate: "2025-11-10",
         endDate: "2025-11-17",
+        meetingPlace: "Main Gate",
+        meetingTime: "09:30",
         status: "scheduled",
         returnReady: false,
       },
@@ -378,6 +411,8 @@ export default function Home() {
         lenderQRCode: makeCode("lender", "Carla Gomez", 2),
         startDate: "2025-10-25",
         endDate: "2025-11-05",
+        meetingPlace: "Engineering Lobby",
+        meetingTime: "14:00",
         status: "borrowed",
         returnReady: true,
       },
@@ -393,6 +428,8 @@ export default function Home() {
         lenderQRCode: makeCode("lender", "Noel Tan", 3),
         startDate: "2025-09-15",
         endDate: "2025-09-22",
+        meetingPlace: "North Parking",
+        meetingTime: "16:00",
         status: "overdue",
         returnReady: true,
       },
@@ -408,6 +445,8 @@ export default function Home() {
         lenderQRCode: makeCode("lender", "Luis Fernandez", 4),
         startDate: "2025-08-28",
         endDate: "2025-09-04",
+        meetingPlace: "Design Center",
+        meetingTime: "11:30",
         status: "completed",
         returnReady: false,
       },
@@ -536,6 +575,17 @@ export default function Home() {
       return Number.isFinite(parsed) ? parsed : null
     }
 
+    const safeOptionalString = (value: any) => {
+      if (value === null || value === undefined) return null
+      return String(value)
+    }
+
+    const normalizeTime = (value: any) => {
+      const raw = safeOptionalString(value)
+      if (!raw) return null
+      return raw.length > 5 ? raw.slice(0, 5) : raw
+    }
+
     const safeDate = (value: any) => {
       if (!value) return null
       const date = new Date(value)
@@ -557,7 +607,10 @@ export default function Home() {
           : record?.request_date
             ? new Date(record.request_date)
             : new Date(),
-      preferredDate: record?.preferred_date ?? record?.preferredDate ?? "",
+      preferredDate: safeString(record?.preferred_date ?? record?.preferredDate ?? ""),
+      returnDate: safeOptionalString(record?.return_date ?? record?.returnDate ?? null),
+      meetingPlace: safeOptionalString(record?.meeting_place ?? record?.meetingPlace ?? null),
+      meetingTime: normalizeTime(record?.meeting_time ?? record?.meetingTime ?? null),
       message: record?.message ?? record?.borrower_message ?? "",
       status: (record?.status ?? "pending") as BorrowRequest["status"],
       ownerId: record?.owner_id
@@ -618,6 +671,9 @@ export default function Home() {
       itemTitle: string
       borrowerName: string
       preferredDate: string
+      returnDate?: string | null
+      meetingPlace?: string | null
+      meetingTime?: string | null
       message: string
     }) => {
       if (!ENABLE_EMAIL_NOTIFICATIONS) {
@@ -644,6 +700,9 @@ export default function Home() {
       borrowerName: string
       lenderName: string
       preferredDate: string
+      returnDate?: string | null
+      meetingPlace?: string | null
+      meetingTime?: string | null
       decisionMessage?: string | null
       notificationType: "approval" | "rejection"
     }) => {
@@ -658,6 +717,9 @@ export default function Home() {
             borrowerName: payload.borrowerName,
             lenderName: payload.lenderName,
             preferredDate: payload.preferredDate,
+            returnDate: payload.returnDate ?? null,
+            meetingPlace: payload.meetingPlace ?? null,
+            meetingTime: payload.meetingTime ?? null,
             decisionMessage: payload.decisionMessage ?? "",
             notificationType: payload.notificationType,
           },
@@ -1233,7 +1295,13 @@ export default function Home() {
     setShowRequestModal(true)
   }
 
-  const handleSubmitRequest = async (data: { date: string; message: string }): Promise<boolean> => {
+  const handleSubmitRequest = async (data: {
+    preferredDate: string
+    returnDate: string
+    meetingPlace: string
+    meetingTime: string
+    message: string
+  }): Promise<boolean> => {
     if (!currentUser || !selectedItem) {
       console.error("Attempted to submit a borrow request without an active user or selected item.")
       return false
@@ -1277,7 +1345,10 @@ export default function Home() {
       borrower_name: currentUser.name,
       borrower_email: currentUser.email ?? "",
       borrower_rating: currentUser.rating ?? 0,
-      preferred_date: data.date,
+      preferred_date: data.preferredDate,
+      return_date: data.returnDate,
+      meeting_place: data.meetingPlace,
+      meeting_time: data.meetingTime,
       message: data.message,
       status: "pending",
       owner_id: selectedItem.ownerId ?? null,
@@ -1304,7 +1375,11 @@ export default function Home() {
         const enriched = !mapped.lenderEmail && lenderEmail ? { ...mapped, lenderEmail } : mapped
         setBorrowRequests((prev) => [enriched, ...prev.filter((req) => req.id !== enriched.id)])
         setRequestError(null)
-  showBanner(`Request submitted for ${enriched.itemTitle} on ${enriched.preferredDate}.`, "success")
+        const meetingDetails = data.meetingPlace ? ` at ${data.meetingPlace}` : ""
+        showBanner(
+          `Request submitted for ${enriched.itemTitle} on ${enriched.preferredDate} at ${data.meetingTime}${meetingDetails}.`,
+          "success",
+        )
         setShowRequestModal(false)
         setRequestsView("borrower")
 
@@ -1315,6 +1390,9 @@ export default function Home() {
             itemTitle: enriched.itemTitle,
             borrowerName: enriched.borrowerName,
             preferredDate: enriched.preferredDate,
+            returnDate: enriched.returnDate ?? data.returnDate,
+            meetingPlace: enriched.meetingPlace ?? data.meetingPlace,
+            meetingTime: enriched.meetingTime ?? data.meetingTime,
             message: enriched.message || "",
           })
         }
@@ -1332,11 +1410,12 @@ export default function Home() {
   }
 
   const handleApproveRequest = async (requestId: string, responseMessage?: string) => {
+    const requestIdValue = Number.isFinite(Number(requestId)) ? Number(requestId) : requestId
     try {
       const { data, error } = await supabase
         .from("borrow_requests")
         .update({ status: "approved", decision_message: responseMessage ?? null })
-        .eq("id", requestId)
+        .eq("id", requestIdValue)
         .select()
         .single()
 
@@ -1349,6 +1428,7 @@ export default function Home() {
       if (data) {
         const mapped = mapBorrowRequestRecord(data)
         setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
+        setScheduleDraftRequest(mapped)
         setShowScheduleModal(true)
 
         if (mapped.borrowerEmail) {
@@ -1358,6 +1438,9 @@ export default function Home() {
             borrowerName: mapped.borrowerName,
             lenderName: mapped.lenderName,
             preferredDate: mapped.preferredDate,
+            returnDate: mapped.returnDate,
+            meetingPlace: mapped.meetingPlace,
+            meetingTime: mapped.meetingTime,
             decisionMessage: responseMessage ?? mapped.decisionMessage ?? null,
             notificationType: "approval",
           })
@@ -1370,11 +1453,12 @@ export default function Home() {
   }
 
   const handleRejectRequest = async (requestId: string, responseMessage?: string) => {
+    const requestIdValue = Number.isFinite(Number(requestId)) ? Number(requestId) : requestId
     try {
       const { data, error } = await supabase
         .from("borrow_requests")
         .update({ status: "rejected", decision_message: responseMessage ?? null })
-        .eq("id", requestId)
+        .eq("id", requestIdValue)
         .select()
         .single()
 
@@ -1395,6 +1479,9 @@ export default function Home() {
             borrowerName: mapped.borrowerName,
             lenderName: mapped.lenderName,
             preferredDate: mapped.preferredDate,
+            returnDate: mapped.returnDate,
+            meetingPlace: mapped.meetingPlace,
+            meetingTime: mapped.meetingTime,
             decisionMessage: responseMessage ?? mapped.decisionMessage ?? null,
             notificationType: "rejection",
           })
@@ -1407,11 +1494,12 @@ export default function Home() {
   }
 
   const handleCompleteRequest = async (requestId: string) => {
+    const requestIdValue = Number.isFinite(Number(requestId)) ? Number(requestId) : requestId
     try {
       const { data, error } = await supabase
         .from("borrow_requests")
         .update({ status: "completed" })
-        .eq("id", requestId)
+        .eq("id", requestIdValue)
         .select()
         .single()
 
@@ -1431,8 +1519,13 @@ export default function Home() {
     }
   }
 
-  const handleCreateSchedule = (data: { startDate: string; endDate: string }) => {
-    const approvedRequest = borrowRequests.find((r) => r.status === "approved")
+  const handleCreateSchedule = (data: {
+    startDate: string
+    endDate: string
+    meetingPlace: string
+    meetingTime: string
+  }) => {
+    const approvedRequest = scheduleDraftRequest ?? borrowRequests.find((r) => r.status === "approved")
     if (approvedRequest) {
       const timestamp = Date.now()
       const borrowerSlug = approvedRequest.borrowerName.replace(/\s+/g, "-").toLowerCase()
@@ -1450,13 +1543,32 @@ export default function Home() {
         lenderQRCode: `lender-${lenderSlug}-${timestamp}`,
         startDate: data.startDate,
         endDate: data.endDate,
+        meetingPlace: data.meetingPlace,
+        meetingTime: data.meetingTime,
         status: "awaiting_handoff",
         returnReady: false,
       }
       setBorrowSchedules((prev) => [...prev, newSchedule])
+      setBorrowRequests((prev) =>
+        prev.map((req) =>
+          req.id === approvedRequest.id
+            ? {
+                ...req,
+                preferredDate: data.startDate,
+                returnDate: data.endDate,
+                meetingPlace: data.meetingPlace,
+                meetingTime: data.meetingTime,
+              }
+            : req,
+        ),
+      )
       void updateItemQuantity(approvedRequest.itemId, -1)
       setShowScheduleModal(false)
-      showBanner("Schedule created successfully!", "success")
+      setScheduleDraftRequest(null)
+      showBanner(
+        `Schedule created for ${approvedRequest.borrowerName} from ${data.startDate} to ${data.endDate} at ${data.meetingTime} in ${data.meetingPlace}.`,
+        "success",
+      )
     }
   }
 
@@ -2276,9 +2388,10 @@ export default function Home() {
       <ScheduleModal
         isOpen={showScheduleModal}
         onClose={() => setShowScheduleModal(false)}
-        itemTitle={borrowRequests.find((r) => r.status === "approved")?.itemTitle || ""}
-        borrowerName={borrowRequests.find((r) => r.status === "approved")?.borrowerName || ""}
+        itemTitle={scheduleModalContext?.itemTitle ?? ""}
+        borrowerName={scheduleModalContext?.borrowerName ?? ""}
         onSubmit={handleCreateSchedule}
+        defaults={scheduleModalContext?.defaults}
       />
 
       {selectedQRCode && (

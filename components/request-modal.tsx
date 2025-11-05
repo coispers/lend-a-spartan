@@ -1,36 +1,79 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
-import { X, Calendar, MessageSquare } from "lucide-react"
-
+import { X, Calendar, MessageSquare, Clock, MapPin } from "lucide-react"
 interface RequestModalProps {
   isOpen: boolean
   onClose: () => void
   item: any
-  onSubmit: (data: { date: string; message: string }) => Promise<boolean> | boolean
+  onSubmit: (data: {
+    preferredDate: string
+    returnDate: string
+    meetingPlace: string
+    meetingTime: string
+    message: string
+  }) => Promise<boolean> | boolean
   errorMessage?: string | null
 }
 
 export default function RequestModal({ isOpen, onClose, item, onSubmit, errorMessage }: RequestModalProps) {
-  const [date, setDate] = useState("")
+  const [preferredDate, setPreferredDate] = useState("")
+  const [returnDate, setReturnDate] = useState("")
+  const [meetingPlace, setMeetingPlace] = useState("")
+  const [meetingTime, setMeetingTime] = useState("")
   const [message, setMessage] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!isOpen) {
+      setPreferredDate("")
+      setReturnDate("")
+      setMeetingPlace("")
+      setMeetingTime("")
+      setMessage("")
+    }
+  }, [isOpen])
 
   if (!isOpen || !item) return null
 
   const handleSubmit = async () => {
-    if (!date) {
-      alert("Please select a date")
+    if (!preferredDate) {
+      alert("Please select a preferred start date")
+      return
+    }
+    if (!returnDate) {
+      alert("Please select a return date")
+      return
+    }
+    if (new Date(returnDate) < new Date(preferredDate)) {
+      alert("Return date must be on or after the preferred start date")
+      return
+    }
+    if (!meetingPlace.trim()) {
+      alert("Please provide a meeting place")
+      return
+    }
+    if (!meetingTime) {
+      alert("Please choose a meeting time")
       return
     }
     setIsSubmitting(true)
     try {
-      const result = await onSubmit({ date, message })
+      const result = await onSubmit({
+        preferredDate,
+        returnDate,
+        meetingPlace: meetingPlace.trim(),
+        meetingTime,
+        message,
+      })
       if (result) {
-        setDate("")
+        setPreferredDate("")
+        setReturnDate("")
+        setMeetingPlace("")
+        setMeetingTime("")
         setMessage("")
       }
     } catch (error) {
@@ -57,18 +100,64 @@ export default function RequestModal({ isOpen, onClose, item, onSubmit, errorMes
         )}
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-              <Calendar size={16} />
-              Preferred Date
-            </label>
-            <Input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="border border-border"
-              disabled={isSubmitting}
-            />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                <Calendar size={16} />
+                Preferred Start Date
+              </label>
+              <Input
+                type="date"
+                value={preferredDate}
+                onChange={(e) => setPreferredDate(e.target.value)}
+                className="border border-border"
+                disabled={isSubmitting}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                <Calendar size={16} />
+                Return Date
+              </label>
+              <Input
+                type="date"
+                value={returnDate}
+                onChange={(e) => setReturnDate(e.target.value)}
+                className="border border-border"
+                disabled={isSubmitting}
+                min={preferredDate || undefined}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                <MapPin size={16} />
+                Meeting Place
+              </label>
+              <Input
+                type="text"
+                value={meetingPlace}
+                onChange={(e) => setMeetingPlace(e.target.value)}
+                placeholder="e.g. Library Atrium"
+                className="border border-border"
+                disabled={isSubmitting}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                <Clock size={16} />
+                Meeting Time
+              </label>
+              <Input
+                type="time"
+                value={meetingTime}
+                onChange={(e) => setMeetingTime(e.target.value)}
+                className="border border-border"
+                disabled={isSubmitting}
+              />
+            </div>
           </div>
 
           <div>

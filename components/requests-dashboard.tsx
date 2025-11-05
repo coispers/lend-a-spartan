@@ -20,6 +20,9 @@ interface BorrowRequest {
   borrowerEmail: string
   requestDate: Date
   preferredDate: string
+  returnDate: string | null
+  meetingPlace: string | null
+  meetingTime: string | null
   message: string
   status: "pending" | "approved" | "rejected" | "completed"
   ownerId: string | null

@@ -2,7 +2,7 @@
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Calendar, Clock, AlertCircle, QrCode, CheckCircle, Scan } from "lucide-react"
+import { Calendar, Clock, AlertCircle, QrCode, CheckCircle, Scan, MapPin } from "lucide-react"
 
 interface BorrowSchedule {
   id: string
@@ -16,6 +16,8 @@ interface BorrowSchedule {
   lenderQRCode: string
   startDate: string
   endDate: string
+  meetingPlace: string | null
+  meetingTime: string | null
   status: "scheduled" | "awaiting_handoff" | "borrowed" | "overdue" | "completed"
   returnReady: boolean
 }
@@ -35,6 +37,16 @@ export default function BorrowScheduleComponent({
   onScanQR,
   forceAllActions = false,
 }: BorrowScheduleProps) {
+  const formatTime = (value: string | null) => {
+    if (!value) return null
+    const [hourStr, minute] = value.split(":")
+    const hour = Number.parseInt(hourStr ?? "", 10)
+    if (Number.isNaN(hour)) return value
+    const suffix = hour >= 12 ? "PM" : "AM"
+    const normalizedHour = ((hour + 11) % 12) + 1
+    return `${normalizedHour}:${minute ?? "00"} ${suffix}`
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "awaiting_handoff":
@@ -97,6 +109,7 @@ export default function BorrowScheduleComponent({
           const testerMode = forceAllActions && role === "viewer"
           const canBorrower = role === "borrower" || testerMode
           const canLender = role === "lender" || testerMode
+          const meetingTimeLabel = formatTime(schedule.meetingTime)
 
           return (
             <Card key={schedule.id} className="p-3 md:p-4 border border-border hover:shadow-md transition-shadow">
@@ -137,9 +150,20 @@ export default function BorrowScheduleComponent({
                 <div className="flex items-center gap-2">
                   <Calendar size={14} className="md:w-4 md:h-4 text-primary flex-shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">End</p>
+                    <p className="text-xs text-muted-foreground">Return By</p>
                     <p className="text-xs md:text-sm font-medium">{new Date(schedule.endDate).toLocaleDateString()}</p>
                   </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 mb-3">
+                <MapPin size={14} className="md:w-4 md:h-4 text-primary flex-shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Meet-Up</p>
+                  <p className="text-xs md:text-sm font-medium truncate">
+                    {schedule.meetingPlace ? schedule.meetingPlace : "Meeting place TBD"}
+                    {meetingTimeLabel ? ` · ${meetingTimeLabel}` : ""}
+                  </p>
                 </div>
               </div>
 
