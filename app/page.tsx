@@ -127,6 +127,36 @@ interface RatingContextState {
 //set to true to enable email notifications. 
 const ENABLE_EMAIL_NOTIFICATIONS = false
 
+const summarizeSupabaseError = (error: unknown): string | null => {
+  if (!error) {
+    return null
+  }
+
+  if (error instanceof Error) {
+    const code = typeof (error as any).code === "string" ? (error as any).code.trim() : ""
+    const details = typeof (error as any).details === "string" ? (error as any).details.trim() : ""
+    const base = error.message.trim()
+    const parts = [code, base, details].filter(Boolean)
+    return parts.length > 0 ? parts.join(" · ") : base || null
+  }
+
+  if (typeof error === "object") {
+    const payload = error as Record<string, unknown>
+    const code = typeof payload.code === "string" ? payload.code.trim() : ""
+    const message = typeof payload.message === "string" ? payload.message.trim() : ""
+    const details = typeof payload.details === "string" ? payload.details.trim() : ""
+    const hint = typeof payload.hint === "string" ? payload.hint.trim() : ""
+    const parts = [code, message, details, hint].filter(Boolean)
+    return parts.length > 0 ? parts.join(" · ") : null
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error.trim()
+  }
+
+  return null
+}
+
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
@@ -250,40 +280,40 @@ export default function Home() {
     if (profileRatingSyncRef.current === syncedRating) return
     profileRatingSyncRef.current = syncedRating
 
-    const displayRating = syncedRating ?? 0
+    const storedRating = syncedRating ?? 0
 
     setItems((prev) =>
       prev.map((item) =>
         item.ownerId === currentUser.id
-          ? { ...item, lender: { ...item.lender, rating: displayRating } }
+          ? { ...item, lender: { ...item.lender, rating: storedRating } }
           : item,
       ),
     )
 
     setSelectedItem((prev) =>
       prev && prev.ownerId === currentUser.id
-        ? { ...prev, lender: { ...prev.lender, rating: displayRating } }
+        ? { ...prev, lender: { ...prev.lender, rating: storedRating } }
         : prev,
     )
 
     void supabase
       .from("profiles")
-      .update({ rating: syncedRating })
+      .update({ rating: storedRating })
       .eq("id", currentUser.id)
       .then(({ error }) => {
-        if (error) {
-          console.error("Failed to sync profile rating", error)
-        }
+        const message = summarizeSupabaseError(error)
+        if (!message) return
+        console.error("Failed to sync profile rating:", message)
       })
 
     void supabase
       .from("items")
-      .update({ lender_rating: syncedRating })
+      .update({ lender_rating: storedRating })
       .eq("owner_id", currentUser.id)
       .then(({ error }) => {
-        if (error) {
-          console.error("Failed to sync item ratings", error)
-        }
+        const message = summarizeSupabaseError(error)
+        if (!message) return
+        console.error("Failed to sync item ratings:", message)
       })
   }, [currentUser?.id, ratingStats.overallAverage, ratingStats.totalCount])
 
