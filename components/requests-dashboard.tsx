@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CheckCircle, XCircle, Clock, MessageSquare, User, X, Star } from "lucide-react"
 
-type TabValue = "toRate" | "pending" | "approved" | "completed" | "rejected"
+type TabValue = "toRate" | "pending" | "approved" | "ongoing" | "completed" | "rejected"
 
 interface BorrowRequest {
   id: string
@@ -24,7 +24,7 @@ interface BorrowRequest {
   meetingPlace: string | null
   meetingTime: string | null
   message: string
-  status: "pending" | "approved" | "rejected" | "completed"
+  status: "pending" | "approved" | "ongoing" | "rejected" | "completed"
   ownerId: string | null
   lenderName: string
   lenderEmail: string | null
@@ -87,6 +87,8 @@ export default function RequestsDashboard({
     switch (status) {
       case "approved":
         return "bg-green-100 text-green-800"
+      case "ongoing":
+        return "bg-indigo-100 text-indigo-800"
       case "rejected":
         return "bg-red-100 text-red-800"
       case "completed":
@@ -100,6 +102,8 @@ export default function RequestsDashboard({
     switch (status) {
       case "approved":
         return <CheckCircle size={16} />
+      case "ongoing":
+        return <Clock size={16} />
       case "rejected":
         return <XCircle size={16} />
       case "completed":
@@ -111,10 +115,18 @@ export default function RequestsDashboard({
 
   const pendingRequests = requests.filter((r) => r.status === "pending")
   const approvedRequests = requests.filter((r) => r.status === "approved")
+  const ongoingRequests = requests.filter((r) => r.status === "ongoing")
   const completedRequests = requests.filter((r) => r.status === "completed")
   const rejectedRequests = requests.filter((r) => r.status === "rejected")
 
-  const [activeTab, setActiveTab] = useState<TabValue>(() => (toRateRequests.length > 0 ? "toRate" : "pending"))
+  const [activeTab, setActiveTab] = useState<TabValue>(() => {
+    if (toRateRequests.length > 0) return "toRate"
+    if (pendingRequests.length > 0) return "pending"
+    if (approvedRequests.length > 0) return "approved"
+    if (ongoingRequests.length > 0) return "ongoing"
+    if (completedRequests.length > 0) return "completed"
+    return "rejected"
+  })
 
   const renderStars = (value: number) => (
     <div className="flex gap-1 text-accent">
@@ -205,7 +217,7 @@ export default function RequestsDashboard({
   return (
     <div className="space-y-4 md:space-y-6">
       <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as TabValue)} className="w-full">
-        <TabsList className="grid w-full grid-cols-2 md:grid-cols-5 h-auto">
+        <TabsList className="grid w-full grid-cols-2 md:grid-cols-6 h-auto">
           <TabsTrigger value="toRate" className="text-xs md:text-sm py-2">
             <span className="hidden sm:inline">To Rate</span>
             <span className="sm:hidden">R</span> ({toRateRequests.length})
@@ -217,6 +229,10 @@ export default function RequestsDashboard({
           <TabsTrigger value="approved" className="text-xs md:text-sm py-2">
             <span className="hidden sm:inline">Approved</span>
             <span className="sm:hidden">A</span> ({approvedRequests.length})
+          </TabsTrigger>
+          <TabsTrigger value="ongoing" className="text-xs md:text-sm py-2">
+            <span className="hidden sm:inline">Ongoing</span>
+            <span className="sm:hidden">O</span> ({ongoingRequests.length})
           </TabsTrigger>
           <TabsTrigger value="completed" className="text-xs md:text-sm py-2">
             <span className="hidden sm:inline">Completed</span>
@@ -249,6 +265,14 @@ export default function RequestsDashboard({
             <p className="text-center text-muted-foreground py-6 md:py-8">No approved requests</p>
           ) : (
             approvedRequests.map((request) => <RequestCard key={request.id} request={request} />)
+          )}
+        </TabsContent>
+
+        <TabsContent value="ongoing" className="space-y-2 md:space-y-3 mt-3 md:mt-4">
+          {ongoingRequests.length === 0 ? (
+            <p className="text-center text-muted-foreground py-6 md:py-8">No ongoing requests</p>
+          ) : (
+            ongoingRequests.map((request) => <RequestCard key={request.id} request={request} />)
           )}
         </TabsContent>
 
@@ -414,7 +438,7 @@ export default function RequestsDashboard({
                 </div>
               )}
 
-              {currentUserRole === "lender" && selectedRequest.status === "approved" && (
+              {currentUserRole === "lender" && selectedRequest.status === "ongoing" && (
                 <Button
                   onClick={() => {
                     onComplete(selectedRequest.id)

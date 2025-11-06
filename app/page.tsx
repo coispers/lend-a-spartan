@@ -39,7 +39,7 @@ interface BorrowRequest {
   meetingPlace: string | null
   meetingTime: string | null
   message: string
-  status: "pending" | "approved" | "rejected" | "completed"
+  status: "pending" | "approved" | "ongoing" | "rejected" | "completed"
   ownerId: string | null
   lenderName: string
   lenderEmail: string | null
@@ -439,6 +439,19 @@ export default function Home() {
   }, [currentUser?.id, ratingStats.overallAverage, ratingStats.totalCount])
 
   const [borrowSchedules, setBorrowSchedules] = useState<BorrowSchedule[]>([])
+
+  const requestStageOverrides = useMemo(() => {
+    const map = new Map<string, BorrowRequest["status"]>()
+    borrowSchedules.forEach((schedule) => {
+      if (!schedule.requestId) return
+      if (schedule.status === "borrowed") {
+        map.set(schedule.requestId, "ongoing")
+      } else if (schedule.status === "completed") {
+        map.set(schedule.requestId, "completed")
+      }
+    })
+    return map
+  }, [borrowSchedules])
 
   const scheduleCards = useMemo(() => {
     const scheduleList: BorrowSchedule[] = [...borrowSchedules]
@@ -1018,13 +1031,18 @@ export default function Home() {
   const isEditingListing = Boolean(editingItemId)
   const borrowerRequestsForCurrentUser = useMemo(() => {
     if (!currentUser) return []
-    return borrowRequests.filter((req) => req.borrowerId === currentUser.id)
-  }, [borrowRequests, currentUser])
+    return borrowRequests
+      .filter((req) => req.borrowerId === currentUser.id)
+      .map((req) => {
+        const override = requestStageOverrides.get(req.id)
+        return override && override !== req.status ? { ...req, status: override } : req
+      })
+  }, [borrowRequests, currentUser, requestStageOverrides])
 
   const activeBorrowRequestsByItem = useMemo(() => {
     const map = new Map<string, BorrowRequest>()
     borrowerRequestsForCurrentUser.forEach((req) => {
-      if (req.status === "pending" || req.status === "approved") {
+      if (req.status === "pending" || req.status === "approved" || req.status === "ongoing") {
         map.set(req.itemId, req)
       }
     })
@@ -1033,8 +1051,13 @@ export default function Home() {
 
   const lenderRequestsForCurrentUser = useMemo(() => {
     if (!currentUser) return []
-    return borrowRequests.filter((req) => req.ownerId === currentUser.id)
-  }, [borrowRequests, currentUser])
+    return borrowRequests
+      .filter((req) => req.ownerId === currentUser.id)
+      .map((req) => {
+        const override = requestStageOverrides.get(req.id)
+        return override && override !== req.status ? { ...req, status: override } : req
+      })
+  }, [borrowRequests, currentUser, requestStageOverrides])
 
   const pendingLenderRequests = useMemo(
     () => lenderRequestsForCurrentUser.filter((req) => req.status === "pending").length,
@@ -1569,30 +1592,42 @@ export default function Home() {
     }
   }
 
+  const updateBorrowRequestStatus = useCallback(
+    async (requestId: string | null | undefined, status: BorrowRequest["status"]) => {
+      if (!requestId) {
+        return false
+      }
+
+      if (status === "ongoing") {
+        return true
+      }
+
+      const requestIdValue = Number.isFinite(Number(requestId)) ? Number(requestId) : requestId
+
+      try {
+        const { error } = await supabase.from("borrow_requests").update({ status }).eq("id", requestIdValue)
+
+        if (error) {
+          console.error(`Failed to update borrow request status to ${status}`, error)
+          return false
+        }
+        return true
+      } catch (err) {
+        console.error("Unexpected error while updating borrow request status", err)
+      }
+
+      return false
+    },
+    [],
+  )
+
   const handleCompleteRequest = async (requestId: string) => {
-    const requestIdValue = Number.isFinite(Number(requestId)) ? Number(requestId) : requestId
-    try {
-      const { data, error } = await supabase
-        .from("borrow_requests")
-        .update({ status: "completed" })
-        .eq("id", requestIdValue)
-        .select()
-        .single()
-
-      if (error) {
-        console.error("Failed to mark borrow request as completed", error)
-        showBanner("Failed to mark the request as completed. Please try again.", "error")
-        return
-      }
-
-      if (data) {
-        const mapped = mapBorrowRequestRecord(data)
-        setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
-      }
-    } catch (err) {
-      console.error("Unexpected error while completing borrow request", err)
-      showBanner("An unexpected error occurred while completing the request.", "error")
+    const success = await updateBorrowRequestStatus(requestId, "completed")
+    if (!success) {
+      showBanner("Failed to mark the request as completed. Please try again.", "error")
+      return
     }
+    setBorrowRequests((prev) => prev.map((req) => (req.id === requestId ? { ...req, status: "completed" } : req)))
   }
 
   const handleCreateSchedule = (data: {
@@ -1882,6 +1917,17 @@ export default function Home() {
 
     setScannerError(null)
     const scheduleItemId = selectedSchedule.itemId
+    const matchedRequest = borrowRequests.find(
+      (request) =>
+        request.itemId === selectedSchedule.itemId && request.borrowerName === selectedSchedule.borrowerName,
+    )
+    const resolvedRequestId = selectedSchedule.requestId ?? matchedRequest?.id ?? null
+
+    const syncRequestStatus = (status: BorrowRequest["status"]) => {
+      if (!resolvedRequestId) return
+      setBorrowRequests((prev) => prev.map((req) => (req.id === resolvedRequestId ? { ...req, status } : req)))
+      void updateBorrowRequestStatus(resolvedRequestId, status)
+    }
 
     if (scanType === "handoff") {
       setBorrowSchedules((prev) =>
@@ -1900,10 +1946,8 @@ export default function Home() {
             console.error("Failed to update schedule status to borrowed", error)
           }
         })
-      showBanner(
-        `Handoff confirmed for ${selectedSchedule.itemTitle}. Status updated to Borrowed.`,
-        "success",
-      )
+      syncRequestStatus("ongoing")
+      showBanner(`Handoff confirmed for ${selectedSchedule.itemTitle}. Transaction is now ongoing.`, "success")
     } else {
       setBorrowSchedules((prev) =>
         prev.map((sched) =>
@@ -1920,19 +1964,16 @@ export default function Home() {
             console.error("Failed to mark schedule as completed", error)
           }
         })
+      syncRequestStatus("completed")
       showBanner(`Item return confirmed. Transaction completed with ${selectedSchedule.borrowerName}.`, "success")
-      const relatedRequest = borrowRequests.find(
-        (request) =>
-          request.itemId === selectedSchedule.itemId && request.borrowerName === selectedSchedule.borrowerName,
-      )
       openRatingModal({
-        requestId: relatedRequest?.id,
-        targetUserId: relatedRequest?.borrowerId ?? null,
+        requestId: matchedRequest?.id,
+        targetUserId: matchedRequest?.borrowerId ?? null,
         targetUserName: selectedSchedule.borrowerName,
         itemTitle: selectedSchedule.itemTitle,
         direction: "lenderToBorrower",
-        existingRating: relatedRequest?.lenderFeedbackRating ?? null,
-        existingReview: relatedRequest?.lenderFeedbackMessage ?? null,
+        existingRating: matchedRequest?.lenderFeedbackRating ?? null,
+        existingReview: matchedRequest?.lenderFeedbackMessage ?? null,
       })
     }
 
@@ -1964,6 +2005,13 @@ export default function Home() {
         (request) =>
           request.itemId === completedSchedule.itemId && request.borrowerName === completedSchedule.borrowerName,
       )
+      const resolvedRequestId = completedSchedule.requestId ?? matchingRequest?.id ?? null
+      if (resolvedRequestId) {
+        setBorrowRequests((prev) =>
+          prev.map((req) => (req.id === resolvedRequestId ? { ...req, status: "completed" } : req)),
+        )
+        void updateBorrowRequestStatus(resolvedRequestId, "completed")
+      }
       openRatingModal({
         requestId: matchingRequest?.id,
         targetUserId: matchingRequest?.borrowerId ?? null,
