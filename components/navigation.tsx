@@ -44,8 +44,8 @@ export default function Navigation({
         {/* Desktop and Mobile Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 md:gap-3 cursor-pointer" onClick={() => handleNavClick("dashboard")}>
-            <div className="w-8 h-8 bg-primary rounded flex items-center justify-center font-bold text-primary-foreground text-sm">
-              LS
+            <div className="w-14 h-14 md:w-20 md:h-16 flex items-center justify-center">
+              <img src="/LaS_logo.png" alt="Lend-A-Spartan Logo" className="w-full h-full object-contain" />
             </div>
             <h1 className="text-lg md:text-xl font-semibold text-foreground">Lend-A-Spartan</h1>
           </div>
