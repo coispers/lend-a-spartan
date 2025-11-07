@@ -23,6 +23,7 @@ import RegisterModal from "@/components/register-modal"
 import ConfirmDeleteModal from "@/components/confirm-delete-modal"
 import { supabase } from "@/lib/supabaseclient"
 import type { AuthUser } from "@/types/auth"
+import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 interface BorrowRequest {
   id: string
@@ -177,6 +178,90 @@ const summarizeSupabaseError = (error: unknown): string | null => {
   return null
 }
 
+const buildFallbackName = (email: string | null | undefined) => {
+  if (!email) return "Spartan User"
+  const localPart = email.split("@")[0]
+  return localPart ? `${localPart} User` : "Spartan User"
+}
+
+const mapSupabaseUserToAuthUser = async (user: SupabaseUser): Promise<AuthUser> => {
+  const { data: profileData, error: profileError } = await supabase
+    .from("profiles")
+    .select("first_name, middle_name, last_name")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (profileError && profileError.code !== "PGRST116") {
+    throw new Error(profileError.message)
+  }
+
+  const metadata = user.user_metadata ?? {}
+
+  const metadataFirst = typeof metadata.first_name === "string" ? metadata.first_name.trim() : undefined
+  const metadataMiddle = typeof metadata.middle_name === "string" ? metadata.middle_name.trim() : undefined
+  const metadataLast = typeof metadata.last_name === "string" ? metadata.last_name.trim() : undefined
+  const metadataFull = typeof metadata.full_name === "string" ? metadata.full_name.trim() : undefined
+
+  const profileFirst = profileData?.first_name?.trim() || undefined
+  const profileMiddle = profileData?.middle_name?.trim() || undefined
+  const profileLast = profileData?.last_name?.trim() || undefined
+
+  const defaultHandle = buildFallbackName(user.email)
+
+  const profileFull = [profileFirst, profileMiddle, profileLast].filter(Boolean).join(" ")
+  const resolvedFullFromProfile = metadataFull || (profileFull.length > 0 ? profileFull : undefined)
+
+  let resolvedFirst = profileFirst || metadataFirst
+  let resolvedMiddle = profileMiddle || metadataMiddle
+  let resolvedLast = profileLast || metadataLast
+
+  if ((!resolvedFirst || !resolvedLast) && resolvedFullFromProfile) {
+    const nameParts = resolvedFullFromProfile.split(" ").filter(Boolean)
+    if (!resolvedFirst && nameParts.length > 0) resolvedFirst = nameParts[0]
+    if (!resolvedLast && nameParts.length > 1) resolvedLast = nameParts[nameParts.length - 1]
+    if (!resolvedMiddle && nameParts.length > 2) {
+      resolvedMiddle = nameParts.slice(1, nameParts.length - 1).join(" ")
+    }
+  }
+
+  if (!resolvedFirst) {
+    const fallbackParts = defaultHandle.split(" ")
+    resolvedFirst = fallbackParts[0] || defaultHandle
+  }
+
+  if (!resolvedLast) {
+    resolvedLast = "User"
+  }
+
+  const fullName =
+    resolvedFullFromProfile || [resolvedFirst, resolvedMiddle, resolvedLast].filter(Boolean).join(" ")
+
+  return {
+    id: user.id,
+    email: user.email ?? "",
+    firstName: resolvedFirst,
+    middleName: resolvedMiddle ?? null,
+    lastName: resolvedLast,
+    fullName,
+    createdAt: user.created_at ?? null,
+  }
+}
+
+const createCurrentUserState = (authUser: AuthUser) => ({
+  id: authUser.id,
+  firstName: authUser.firstName,
+  middleName: authUser.middleName ?? null,
+  lastName: authUser.lastName,
+  fullName: authUser.fullName,
+  name: authUser.fullName || authUser.email,
+  email: authUser.email,
+  rating: 0,
+  itemsLent: 0,
+  itemsBorrowed: 0,
+  joinDate: authUser.createdAt ? new Date(authUser.createdAt) : new Date(),
+  trustScore: 85,
+})
+
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [currentUser, setCurrentUser] = useState<any>(null)
@@ -211,6 +296,72 @@ export default function Home() {
   const [scheduleDraftRequest, setScheduleDraftRequest] = useState<BorrowRequest | null>(null)
 
   const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([])
+
+  const applyAuthenticatedUser = useCallback((authUser: AuthUser) => {
+    setCurrentUser(createCurrentUserState(authUser))
+    setIsAuthenticated(true)
+    setShowSignInModal(false)
+    setShowRegisterModal(false)
+  }, [])
+
+  useEffect(() => {
+    let canceled = false
+
+    const hydrateSession = async () => {
+      try {
+        const { data, error } = await supabase.auth.getSession()
+        if (error) {
+          console.error("Failed to restore Supabase session", error)
+          return
+        }
+
+        const user = data.session?.user
+        if (user) {
+          try {
+            const authUser = await mapSupabaseUserToAuthUser(user)
+            if (!canceled) {
+              applyAuthenticatedUser(authUser)
+            }
+          } catch (resolveError) {
+            console.error("Failed to resolve session user", resolveError)
+          }
+        } else if (!canceled) {
+          setIsAuthenticated(false)
+          setCurrentUser(null)
+        }
+      } catch (unexpected) {
+        console.error("Unexpected error while restoring session", unexpected)
+      }
+    }
+
+    void hydrateSession()
+
+    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (canceled) {
+        return
+      }
+
+      const user = session?.user
+      if (user) {
+        try {
+          const authUser = await mapSupabaseUserToAuthUser(user)
+          if (!canceled) {
+            applyAuthenticatedUser(authUser)
+          }
+        } catch (resolveError) {
+          console.error("Failed to resolve auth change user", resolveError)
+        }
+      } else {
+        setIsAuthenticated(false)
+        setCurrentUser(null)
+      }
+    })
+
+    return () => {
+      canceled = true
+      subscription?.subscription.unsubscribe()
+    }
+  }, [applyAuthenticatedUser])
 
   const mapBorrowScheduleRecord = useCallback((record: any): BorrowSchedule => {
     const safeString = (value: any, fallback = "") => {
@@ -1251,23 +1402,7 @@ export default function Home() {
   }, [requestsView, userMode])
 
   const handleLogin = (user: AuthUser) => {
-    setCurrentUser({
-      id: user.id,
-      firstName: user.firstName,
-      middleName: user.middleName,
-      lastName: user.lastName,
-      fullName: user.fullName,
-      name: user.fullName || user.email,
-      email: user.email,
-      rating: 0,
-      itemsLent: 0,
-      itemsBorrowed: 0,
-      joinDate: user.createdAt ? new Date(user.createdAt) : new Date(),
-      trustScore: 85,
-    })
-    setIsAuthenticated(true)
-    setShowSignInModal(false)
-    setShowRegisterModal(false)
+    applyAuthenticatedUser(user)
     setUserMode("dashboard")
   }
 
