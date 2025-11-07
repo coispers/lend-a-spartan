@@ -226,11 +226,6 @@ export default function SignInModal({ isOpen, onClose, onLogin, onSwitchToRegist
           >
             {loading ? "Signing In..." : "Sign In"}
           </Button>
-
-          <p className="text-xs text-center text-muted-foreground mt-4 pt-4 border-t border-border">
-            Demo: admin@g.batstate-u.edu.ph / admin123
-          </p>
-
           <div className="text-center pt-2">
             <p className="text-sm text-muted-foreground">
               Still don't have an account?{" "}
