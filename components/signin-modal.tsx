@@ -226,6 +226,7 @@ export default function SignInModal({ isOpen, onClose, onLogin, onSwitchToRegist
           >
             {loading ? "Signing In..." : "Sign In"}
           </Button>
+
           <div className="text-center pt-2">
             <p className="text-sm text-muted-foreground">
               Still don't have an account?{" "}
