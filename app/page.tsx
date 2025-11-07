@@ -1527,6 +1527,7 @@ export default function Home() {
       if (data) {
         const mapped = mapBorrowRequestRecord(data)
         setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
+        void updateItemQuantity(mapped.itemId, -1)
         setScheduleDraftRequest(mapped)
         setShowScheduleModal(true)
 
@@ -1706,7 +1707,6 @@ export default function Home() {
           ),
         )
 
-        void updateItemQuantity(approvedRequest.itemId, -1)
         setShowScheduleModal(false)
         setScheduleDraftRequest(null)
         showBanner(
