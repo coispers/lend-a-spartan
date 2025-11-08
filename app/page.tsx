@@ -259,7 +259,6 @@ const createCurrentUserState = (authUser: AuthUser) => ({
   itemsLent: 0,
   itemsBorrowed: 0,
   joinDate: authUser.createdAt ? new Date(authUser.createdAt) : new Date(),
-  trustScore: 85,
 })
 
 export default function Home() {
@@ -1320,6 +1319,35 @@ export default function Home() {
     ratingStats.overallAverage,
     ratingStats.totalCount,
   ])
+
+  const userItemCounts = useMemo(() => {
+    if (!currentUser?.id) {
+      return { lent: 0, borrowed: 0 }
+    }
+
+    const isCountableStatus = (status: BorrowRequest["status"]) =>
+      status === "approved" || status === "ongoing" || status === "completed"
+
+    const lent = borrowRequests.filter(
+      (request) => request.ownerId === currentUser.id && isCountableStatus(request.status),
+    ).length
+
+    const borrowed = borrowRequests.filter(
+      (request) => request.borrowerId === currentUser.id && isCountableStatus(request.status),
+    ).length
+
+    return { lent, borrowed }
+  }, [borrowRequests, currentUser?.id])
+
+  useEffect(() => {
+    setCurrentUser((prev: any) => {
+      if (!prev) return prev
+      if (prev.itemsLent === userItemCounts.lent && prev.itemsBorrowed === userItemCounts.borrowed) {
+        return prev
+      }
+      return { ...prev, itemsLent: userItemCounts.lent, itemsBorrowed: userItemCounts.borrowed }
+    })
+  }, [userItemCounts])
 
   const baseRecentActivity = useMemo<ActivityEntry[]>(
     () => [
@@ -2474,7 +2502,6 @@ export default function Home() {
                   itemsBorrowed={currentUser.itemsBorrowed}
                   joinDate={currentUser.joinDate}
                   reviews={receivedReviews}
-                  trustScore={currentUser.trustScore}
                   lenderRating={ratingStats.asLender.average}
                   lenderReviewCount={ratingStats.asLender.count}
                   borrowerRating={ratingStats.asBorrower.average}

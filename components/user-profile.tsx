@@ -1,8 +1,7 @@
 "use client"
 
 import { Card } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Star, TrendingUp, CheckCircle, AlertCircle } from "lucide-react"
+import { Star, CheckCircle, AlertCircle } from "lucide-react"
 
 interface UserReview {
   id: string
@@ -21,7 +20,6 @@ interface UserProfileProps {
   itemsBorrowed: number
   joinDate: Date
   reviews: UserReview[]
-  trustScore: number
   lenderRating: number | null
   lenderReviewCount: number
   borrowerRating: number | null
@@ -36,20 +34,11 @@ export default function UserProfile({
   itemsBorrowed,
   joinDate,
   reviews,
-  trustScore,
   lenderRating,
   lenderReviewCount,
   borrowerRating,
   borrowerReviewCount,
 }: UserProfileProps) {
-  const getTrustBadge = (score: number) => {
-    if (score >= 90) return { label: "Highly Trusted", color: "bg-green-100 text-green-800" }
-    if (score >= 75) return { label: "Trusted", color: "bg-blue-100 text-blue-800" }
-    if (score >= 60) return { label: "Verified", color: "bg-yellow-100 text-yellow-800" }
-    return { label: "New Member", color: "bg-gray-100 text-gray-800" }
-  }
-
-  const trustBadge = getTrustBadge(trustScore)
   const formatRatingValue = (value: number | null) => (value !== null ? value.toFixed(2) : "—")
   const formatReviewCount = (count: number) => `${count} review${count === 1 ? "" : "s"}`
 
@@ -62,10 +51,9 @@ export default function UserProfile({
             <h2 className="text-3xl font-bold text-foreground mb-2">{userName}</h2>
             <p className="text-sm text-muted-foreground">Member since {new Date(joinDate).toLocaleDateString()}</p>
           </div>
-          <Badge className={trustBadge.color}>{trustBadge.label}</Badge>
         </div>
 
-  <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-4">
           <div className="text-center">
             <div className="flex items-center justify-center gap-1 mb-1">
               <Star size={20} className="fill-accent text-accent" />
@@ -86,13 +74,6 @@ export default function UserProfile({
               <span className="text-xl font-semibold text-foreground">{formatRatingValue(borrowerRating)}</span>
             </div>
             <p className="text-xs text-muted-foreground">As borrower • {formatReviewCount(borrowerReviewCount)}</p>
-          </div>
-          <div className="text-center">
-            <div className="flex items-center justify-center gap-1 mb-1">
-              <TrendingUp size={20} className="text-primary" />
-              <span className="text-2xl font-bold text-foreground">{trustScore}%</span>
-            </div>
-            <p className="text-xs text-muted-foreground">Trust Score</p>
           </div>
           <div className="text-center">
             <p className="text-2xl font-bold text-foreground">{itemsLent}</p>
