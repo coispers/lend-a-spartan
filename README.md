@@ -3,6 +3,11 @@
 A secure and user-friendly **web-based lending system** designed exclusively for **Batangas State University students**.  
 Lend-A-Spartan enables students to conveniently **borrow and lend everyday school essentials** (calculators, chargers, umbrellas, etc.) with accountability, safety, and trust.
 
+🔗 **Live Demo:** [https://lend-a-spartan.vercel.app/](https://lend-a-spartan.vercel.app/)  
+🧪 **Demo Account:**  
+- Email: `admin@g.batstate-u.edu.ph`  
+- Password: `admin123`
+
 ---
 
 ## 🚩 Problem Statement
@@ -34,7 +39,7 @@ Develop a secure and user-friendly web-based lending system for Batangas State U
 ### 🔐 Authentication
 - BatStateU student-only sign-in (`@g.batstate-u.edu.ph`)
 - Email verification
-- Basic profile setup
+- Basic profile setup (name, year, campus)
 
 ### ⭐ User Reputation
 - Profile statistics: completed lend/borrow transactions
