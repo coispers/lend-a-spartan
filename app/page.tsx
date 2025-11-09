@@ -1,277 +1,72 @@
 "use client"
 
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
-import { Card } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Plus, Inbox, Calendar, User, Save, CheckCircle2, AlertTriangle, Info } from "lucide-react"
 import Navigation from "@/components/navigation"
 import ItemDetailModal from "@/components/item-detail-modal"
 import RequestModal from "@/components/request-modal"
-import SearchFilters from "@/components/search-filters"
-import ItemsGrid from "@/components/items-grid"
-import RequestsDashboard from "@/components/requests-dashboard"
-import BorrowScheduleComponent from "@/components/borrow-schedule"
 import ScheduleModal from "@/components/schedule-modal"
 import QRCodeGenerator from "@/components/qr-code-generator"
 import QRScanner from "@/components/qr-scanner"
 import RatingModal from "@/components/rating-modal"
-import UserProfile from "@/components/user-profile"
-import Dashboard from "@/components/dashboard"
-import SignInModal from "@/components/signin-modal"
-import RegisterModal from "@/components/register-modal"
 import ConfirmDeleteModal from "@/components/confirm-delete-modal"
+import { DashboardView } from "@/components/views/dashboard-view"
+import { BrowseView } from "@/components/views/browse-view"
+import { RequestsView } from "@/components/views/requests-view"
+import { ProfileView } from "@/components/views/profile-view"
+import { ScheduleView } from "@/components/views/schedule-view"
+import { LendView } from "@/components/views/lend-view"
+import { LandingPage } from "@/components/views/landing-page"
+import { AuthModals } from "@/components/views/auth-modals"
 import { supabase } from "@/lib/supabaseclient"
+import { slugify, summarizeSupabaseError } from "@/lib/home-utils"
+import { mapBorrowRequestRecord, mapBorrowScheduleRecord } from "@/lib/mappers"
+import { sendBorrowerEmailNotification, sendLenderEmailNotification } from "@/lib/notifications"
+import { useAuthSession } from "@/hooks/useAuthSession"
+import { useDashboardBanner } from "@/hooks/useDashboardBanner"
+import { useItemsFeature } from "@/hooks/useItemsFeature"
+import { useRatingsFeature } from "@/hooks/useRatingsFeature"
+import { useBorrowRequests } from "@/hooks/useBorrowRequests"
+import { useBorrowSchedules } from "@/hooks/useBorrowSchedules"
+import {
+  buildActiveBorrowRequestsByItem,
+  countPendingRequests,
+  getBorrowerRequestsForUser,
+  getLenderRequestsForUser,
+} from "@/lib/request-utils"
+import {
+  buildDashboardMetrics,
+  buildRecentActivity,
+  calculateRatingStats,
+  calculateUserItemCounts,
+  collectReceivedReviews,
+} from "@/lib/dashboard-utils"
+import { bannerStyles, bannerIconMap } from "@/lib/banner-styles"
 import type { AuthUser } from "@/types/auth"
-import type { User as SupabaseUser } from "@supabase/supabase-js"
-
-interface BorrowRequest {
-  id: string
-  itemId: string
-  itemTitle: string
-  itemImage: string | null
-  borrowerName: string
-  borrowerRating: number
-  borrowerId: string
-  borrowerEmail: string
-  requestDate: Date
-  preferredDate: string
-  returnDate: string | null
-  meetingPlace: string | null
-  meetingTime: string | null
-  message: string
-  status: "pending" | "approved" | "ongoing" | "rejected" | "completed"
-  ownerId: string | null
-  lenderName: string
-  lenderEmail: string | null
-  decisionMessage?: string | null
-  borrowerFeedbackRating: number | null
-  borrowerFeedbackMessage?: string | null
-  borrowerFeedbackAt?: Date | null
-  lenderFeedbackRating: number | null
-  lenderFeedbackMessage?: string | null
-  lenderFeedbackAt?: Date | null
-}
-
-interface BorrowSchedule {
-  id: string
-  requestId?: string | null
-  itemId: string
-  itemTitle: string
-  borrowerName: string
-  borrowerId: string | null
-  lenderName: string
-  lenderId: string | null
-  borrowerQRCode: string
-  lenderQRCode: string
-  startDate: string
-  endDate: string
-  meetingPlace: string | null
-  meetingTime: string | null
-  status: "scheduled" | "awaiting_handoff" | "borrowed" | "overdue" | "completed"
-  returnReady: boolean
-}
-
-interface MarketplaceItem {
-  id: string
-  title: string
-  category: string
-  condition: string
-  image?: string | null
-  ownerId: string | null
-  lender: {
-    name: string
-    rating: number
-    reviews: number
-    email?: string | null
-  }
-  availability: string
-  deposit: boolean
-  campus: string
-  description?: string | null
-  createdAt: Date
-  quantity: number
-}
-
-interface ListItemFormState {
-  title: string
-  category: string
-  condition: string
-  description: string
-  campus: string
-  quantity: number
-  deposit: boolean
-  imageFile: File | null
-}
-
-interface UserReview {
-  id: string
-  rating: number
-  review: string
-  reviewer: string
-  date: Date
-  itemTitle: string
-}
-
-type ActivityEntry = {
-  id: string
-  type: "request" | "approval" | "completion" | "rating"
-  title: string
-  description: string
-  date: Date
-  status?: string
-}
-
-type RatingDirection = "borrowerToLender" | "lenderToBorrower"
-
-type DashboardRole = "combined" | "lender" | "borrower"
-
-interface DashboardMetricSummary {
-  pendingRequests: number
-  activeBorrowings: number
-  completedTransactions: number
-  rating: number | null
-  totalReviews: number
-}
-
-interface RatingContextState {
-  itemTitle: string
-  targetUserName: string
-  targetUserId?: string | null
-  requestId?: string
-  direction?: RatingDirection
-  existingRating?: number | null
-  existingReview?: string | null
-}
-//set to true to enable email notifications. 
-const ENABLE_EMAIL_NOTIFICATIONS = true
-
-const slugify = (value: string) => value.trim().toLowerCase().replace(/\s+/g, "-")
-
-const summarizeSupabaseError = (error: unknown): string | null => {
-  if (!error) {
-    return null
-  }
-
-  if (error instanceof Error) {
-    const code = typeof (error as any).code === "string" ? (error as any).code.trim() : ""
-    const details = typeof (error as any).details === "string" ? (error as any).details.trim() : ""
-    const base = error.message.trim()
-    const parts = [code, base, details].filter(Boolean)
-    return parts.length > 0 ? parts.join(" · ") : base || null
-  }
-
-  if (typeof error === "object") {
-    const payload = error as Record<string, unknown>
-    const code = typeof payload.code === "string" ? payload.code.trim() : ""
-    const message = typeof payload.message === "string" ? payload.message.trim() : ""
-    const details = typeof payload.details === "string" ? payload.details.trim() : ""
-    const hint = typeof payload.hint === "string" ? payload.hint.trim() : ""
-    const parts = [code, message, details, hint].filter(Boolean)
-    return parts.length > 0 ? parts.join(" · ") : null
-  }
-
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error.trim()
-  }
-
-  return null
-}
-
-const buildFallbackName = (email: string | null | undefined) => {
-  if (!email) return "Spartan User"
-  const localPart = email.split("@")[0]
-  return localPart ? `${localPart} User` : "Spartan User"
-}
-
-const mapSupabaseUserToAuthUser = async (user: SupabaseUser): Promise<AuthUser> => {
-  const { data: profileData, error: profileError } = await supabase
-    .from("profiles")
-    .select("first_name, middle_name, last_name")
-    .eq("id", user.id)
-    .maybeSingle()
-
-  if (profileError && profileError.code !== "PGRST116") {
-    throw new Error(profileError.message)
-  }
-
-  const metadata = user.user_metadata ?? {}
-
-  const metadataFirst = typeof metadata.first_name === "string" ? metadata.first_name.trim() : undefined
-  const metadataMiddle = typeof metadata.middle_name === "string" ? metadata.middle_name.trim() : undefined
-  const metadataLast = typeof metadata.last_name === "string" ? metadata.last_name.trim() : undefined
-  const metadataFull = typeof metadata.full_name === "string" ? metadata.full_name.trim() : undefined
-
-  const profileFirst = profileData?.first_name?.trim() || undefined
-  const profileMiddle = profileData?.middle_name?.trim() || undefined
-  const profileLast = profileData?.last_name?.trim() || undefined
-
-  const defaultHandle = buildFallbackName(user.email)
-
-  const profileFull = [profileFirst, profileMiddle, profileLast].filter(Boolean).join(" ")
-  const resolvedFullFromProfile = metadataFull || (profileFull.length > 0 ? profileFull : undefined)
-
-  let resolvedFirst = profileFirst || metadataFirst
-  let resolvedMiddle = profileMiddle || metadataMiddle
-  let resolvedLast = profileLast || metadataLast
-
-  if ((!resolvedFirst || !resolvedLast) && resolvedFullFromProfile) {
-    const nameParts = resolvedFullFromProfile.split(" ").filter(Boolean)
-    if (!resolvedFirst && nameParts.length > 0) resolvedFirst = nameParts[0]
-    if (!resolvedLast && nameParts.length > 1) resolvedLast = nameParts[nameParts.length - 1]
-    if (!resolvedMiddle && nameParts.length > 2) {
-      resolvedMiddle = nameParts.slice(1, nameParts.length - 1).join(" ")
-    }
-  }
-
-  if (!resolvedFirst) {
-    const fallbackParts = defaultHandle.split(" ")
-    resolvedFirst = fallbackParts[0] || defaultHandle
-  }
-
-  if (!resolvedLast) {
-    resolvedLast = "User"
-  }
-
-  const fullName =
-    resolvedFullFromProfile || [resolvedFirst, resolvedMiddle, resolvedLast].filter(Boolean).join(" ")
-
-  return {
-    id: user.id,
-    email: user.email ?? "",
-    firstName: resolvedFirst,
-    middleName: resolvedMiddle ?? null,
-    lastName: resolvedLast,
-    fullName,
-    createdAt: user.created_at ?? null,
-  }
-}
-
-const createCurrentUserState = (authUser: AuthUser) => ({
-  id: authUser.id,
-  firstName: authUser.firstName,
-  middleName: authUser.middleName ?? null,
-  lastName: authUser.lastName,
-  fullName: authUser.fullName,
-  name: authUser.fullName || authUser.email,
-  email: authUser.email,
-  rating: 0,
-  itemsLent: 0,
-  itemsBorrowed: 0,
-  joinDate: authUser.createdAt ? new Date(authUser.createdAt) : new Date(),
-})
+import type {
+  ActivityEntry,
+  BorrowRequest,
+  BorrowSchedule,
+  DashboardMetricSummary,
+  DashboardRole,
+  MarketplaceItem,
+  RatingDirection,
+  UserMode,
+  UserReview,
+} from "@/types/interfaces"
 
 export default function Home() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
-  const [currentUser, setCurrentUser] = useState<any>(null)
-  const [showItemDetail, setShowItemDetail] = useState(false)
-  const [selectedItem, setSelectedItem] = useState<MarketplaceItem | null>(null)
+  const {
+    isAuthenticated,
+    currentUser,
+    handleLogin: authHandleLogin,
+    handleLogout: authHandleLogout,
+    setCurrentUser,
+  } = useAuthSession()
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("all")
-  const [userMode, setUserMode] = useState<"dashboard" | "browse" | "lend" | "requests" | "schedule" | "profile">(
-    "dashboard",
-  )
+  const [userMode, setUserMode] = useState<UserMode>("dashboard")
   const [sortBy, setSortBy] = useState("newest")
   const [filterCondition, setFilterCondition] = useState("all")
   const [showFilters, setShowFilters] = useState(false)
@@ -283,161 +78,68 @@ export default function Home() {
   const [showQRScanner, setShowQRScanner] = useState(false)
   const [scanType, setScanType] = useState<"handoff" | "return" | null>(null)
   const [scannerError, setScannerError] = useState<string | null>(null)
-  const [showRatingModal, setShowRatingModal] = useState(false)
-  const [ratingContext, setRatingContext] = useState<RatingContextState | null>(null)
   const [showSignInModal, setShowSignInModal] = useState(false)
   const [showRegisterModal, setShowRegisterModal] = useState(false)
   const [requestsView, setRequestsView] = useState<"borrower" | "lender">("borrower")
   const [requestError, setRequestError] = useState<string | null>(null)
   const [lenderNotification, setLenderNotification] = useState<string | null>(null)
+  const { uiBanner, showBanner, dismissBanner } = useDashboardBanner()
+
+  const {
+    items,
+    setItems,
+    itemsLoading,
+    itemsError,
+    updateItemQuantity,
+    showItemDetail,
+    setShowItemDetail,
+    selectedItem,
+    setSelectedItem,
+    handleItemClick,
+    deleteItemError,
+    deletingItemId,
+    pendingDeleteItem,
+    isProcessingDelete,
+    removingItemIds,
+    handleDeleteItemRequest,
+    handleCancelDeleteItem,
+    handleConfirmDeleteItem,
+    listItemForm,
+    setListItemForm,
+    imagePreviewUrl,
+    setImagePreviewUrl,
+    listItemExistingImage,
+    isSubmittingItem,
+    listItemError,
+    listItemSuccess,
+    handleListItemSubmit,
+    startEditingItem,
+    handleCancelEdit,
+    editingItemId,
+    resetListItemState,
+  } = useItemsFeature({ currentUser, showBanner, userMode, setUserMode })
+
   const previousRequestIdsRef = useRef<Set<string>>(new Set())
   const profileRatingSyncRef = useRef<number | null | undefined>(undefined)
   const [scheduleDraftRequest, setScheduleDraftRequest] = useState<BorrowRequest | null>(null)
 
-  const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([])
+  const { borrowRequests, setBorrowRequests } = useBorrowRequests(currentUser?.id ?? null)
 
-  const applyAuthenticatedUser = useCallback((authUser: AuthUser) => {
-    setCurrentUser(createCurrentUserState(authUser))
-    setIsAuthenticated(true)
-    setShowSignInModal(false)
-    setShowRegisterModal(false)
-  }, [])
+  const {
+    borrowSchedules,
+    setBorrowSchedules,
+    requestStageOverrides,
+    scheduleCards,
+    refreshBorrowSchedules,
+  } = useBorrowSchedules({ currentUserId: currentUser?.id ?? null, borrowRequests })
 
-  useEffect(() => {
-    let canceled = false
-
-    const hydrateSession = async () => {
-      try {
-        const { data, error } = await supabase.auth.getSession()
-        if (error) {
-          console.error("Failed to restore Supabase session", error)
-          return
-        }
-
-        const user = data.session?.user
-        if (user) {
-          try {
-            const authUser = await mapSupabaseUserToAuthUser(user)
-            if (!canceled) {
-              applyAuthenticatedUser(authUser)
-            }
-          } catch (resolveError) {
-            console.error("Failed to resolve session user", resolveError)
-          }
-        } else if (!canceled) {
-          setIsAuthenticated(false)
-          setCurrentUser(null)
-        }
-      } catch (unexpected) {
-        console.error("Unexpected error while restoring session", unexpected)
-      }
-    }
-
-    void hydrateSession()
-
-    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (canceled) {
-        return
-      }
-
-      const user = session?.user
-      if (user) {
-        try {
-          const authUser = await mapSupabaseUserToAuthUser(user)
-          if (!canceled) {
-            applyAuthenticatedUser(authUser)
-          }
-        } catch (resolveError) {
-          console.error("Failed to resolve auth change user", resolveError)
-        }
-      } else {
-        setIsAuthenticated(false)
-        setCurrentUser(null)
-      }
-    })
-
-    return () => {
-      canceled = true
-      subscription?.subscription.unsubscribe()
-    }
-  }, [applyAuthenticatedUser])
-
-  const mapBorrowScheduleRecord = useCallback((record: any): BorrowSchedule => {
-    const safeString = (value: any, fallback = "") => {
-      if (value === null || value === undefined) return fallback
-      return String(value)
-    }
-
-    const safeOptionalString = (value: any) => {
-      if (value === null || value === undefined) return null
-      return String(value)
-    }
-
-    const normalizeDate = (value: any) => {
-      const raw = safeString(value, "")
-      if (!raw) return ""
-      return raw.length > 10 ? raw.slice(0, 10) : raw
-    }
-
-    const normalizeTime = (value: any) => {
-      const raw = safeOptionalString(value)
-      if (!raw) return null
-      return raw.length > 5 ? raw.slice(0, 5) : raw
-    }
-
-    const id = safeString(record?.id ?? record?.uuid ?? `sched-${Date.now()}`)
-    const borrowerName = safeString(record?.borrower_name ?? record?.borrowerName ?? "Borrower")
-    const lenderName = safeString(record?.lender_name ?? record?.lenderName ?? "Lender")
-
-    const borrowerCode =
-      safeOptionalString(record?.borrower_qr_code ?? record?.borrowerQRCode ?? null) ??
-      `borrower-${slugify(borrowerName)}-${id}`
-    const lenderCode =
-      safeOptionalString(record?.lender_qr_code ?? record?.lenderQRCode ?? null) ??
-      `lender-${slugify(lenderName)}-${id}`
-
-    return {
-      id,
-      requestId: safeOptionalString(record?.request_id ?? record?.requestId ?? null),
-      itemId: safeString(record?.item_id ?? record?.itemId ?? ""),
-      itemTitle: safeString(record?.item_title ?? record?.itemTitle ?? "Borrowed Item"),
-      borrowerName,
-      borrowerId: safeOptionalString(record?.borrower_id ?? record?.borrowerId ?? null),
-      lenderName,
-      lenderId: safeOptionalString(record?.lender_id ?? record?.lenderId ?? null),
-      borrowerQRCode: borrowerCode,
-      lenderQRCode: lenderCode,
-      startDate: normalizeDate(record?.start_date ?? record?.startDate ?? ""),
-      endDate: normalizeDate(record?.end_date ?? record?.endDate ?? ""),
-      meetingPlace: safeOptionalString(record?.meeting_place ?? record?.meetingPlace ?? null),
-      meetingTime: normalizeTime(record?.meeting_time ?? record?.meetingTime ?? null),
-      status: (record?.status ?? "scheduled") as BorrowSchedule["status"],
-      returnReady: Boolean(record?.return_ready ?? record?.returnReady ?? false),
-    }
-  }, [])
-
-  const fetchBorrowSchedules = useCallback(
-    async (userId: string) => {
-      try {
-        const { data, error } = await supabase
-          .from("borrow_schedules")
-          .select("*")
-          .or(`borrower_id.eq.${userId},lender_id.eq.${userId}`)
-          .order("start_date", { ascending: false })
-
-        if (error) {
-          console.error("Failed to load borrow schedules", error)
-          return
-        }
-
-        const mapped = (data ?? []).map(mapBorrowScheduleRecord)
-        setBorrowSchedules(mapped)
-      } catch (err) {
-        console.error("Unexpected error while loading borrow schedules", err)
-      }
-    },
-    [mapBorrowScheduleRecord],
-  )
+  const {
+    showRatingModal,
+    ratingContext,
+    openRatingModal,
+    closeRatingModal,
+    handleSubmitRating,
+  } = useRatingsFeature({ setBorrowRequests, showBanner })
 
   const scheduleModalContext = useMemo(() => {
     if (!scheduleDraftRequest) {
@@ -462,72 +164,15 @@ export default function Home() {
     }
   }, [scheduleDraftRequest])
 
-  const receivedReviews = useMemo<UserReview[]>(() => {
-    if (!currentUser?.id) return []
-    const userId = currentUser.id
+  const receivedReviews = useMemo(
+    () => collectReceivedReviews({ borrowRequests, currentUserId: currentUser?.id ?? null }),
+    [borrowRequests, currentUser?.id],
+  )
 
-    const reviews: UserReview[] = []
-
-    borrowRequests.forEach((request) => {
-      if (request.ownerId === userId && request.borrowerFeedbackRating !== null) {
-        reviews.push({
-          id: `${request.id}-borrower-feedback`,
-          rating: request.borrowerFeedbackRating,
-          review: request.borrowerFeedbackMessage ?? "",
-          reviewer: request.borrowerName,
-          date: request.borrowerFeedbackAt ?? request.requestDate,
-          itemTitle: request.itemTitle,
-        })
-      }
-
-      if (request.borrowerId === userId && request.lenderFeedbackRating !== null) {
-        reviews.push({
-          id: `${request.id}-lender-feedback`,
-          rating: request.lenderFeedbackRating,
-          review: request.lenderFeedbackMessage ?? "",
-          reviewer: request.lenderName,
-          date: request.lenderFeedbackAt ?? request.requestDate,
-          itemTitle: request.itemTitle,
-        })
-      }
-    })
-
-    reviews.sort((a, b) => b.date.getTime() - a.date.getTime())
-    return reviews
-  }, [borrowRequests, currentUser?.id])
-
-  const ratingStats = useMemo(() => {
-    if (!currentUser?.id) {
-      return {
-        asLender: { average: null as number | null, count: 0 },
-        asBorrower: { average: null as number | null, count: 0 },
-        overallAverage: null as number | null,
-        totalCount: 0,
-      }
-    }
-
-    const userId = currentUser.id
-
-    const average = (values: number[]): number | null =>
-      values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null
-
-    const ratingsAsLender = borrowRequests
-      .filter((request) => request.ownerId === userId && request.borrowerFeedbackRating !== null)
-      .map((request) => request.borrowerFeedbackRating as number)
-
-    const ratingsAsBorrower = borrowRequests
-      .filter((request) => request.borrowerId === userId && request.lenderFeedbackRating !== null)
-      .map((request) => request.lenderFeedbackRating as number)
-
-    const overallPool = [...ratingsAsLender, ...ratingsAsBorrower]
-
-    return {
-      asLender: { average: average(ratingsAsLender), count: ratingsAsLender.length },
-      asBorrower: { average: average(ratingsAsBorrower), count: ratingsAsBorrower.length },
-      overallAverage: average(overallPool),
-      totalCount: overallPool.length,
-    }
-  }, [borrowRequests, currentUser?.id])
+  const ratingStats = useMemo(
+    () => calculateRatingStats(borrowRequests, currentUser?.id ?? null),
+    [borrowRequests, currentUser?.id],
+  )
 
   useEffect(() => {
     setCurrentUser((prev: any) => {
@@ -587,528 +232,6 @@ export default function Home() {
         console.error("Failed to sync item ratings:", message)
       })
   }, [currentUser?.id, ratingStats.overallAverage, ratingStats.totalCount])
-
-  const [borrowSchedules, setBorrowSchedules] = useState<BorrowSchedule[]>([])
-
-  const requestStageOverrides = useMemo(() => {
-    const map = new Map<string, BorrowRequest["status"]>()
-    borrowSchedules.forEach((schedule) => {
-      if (!schedule.requestId) return
-      if (schedule.status === "borrowed") {
-        map.set(schedule.requestId, "ongoing")
-      } else if (schedule.status === "completed") {
-        map.set(schedule.requestId, "completed")
-      }
-    })
-    return map
-  }, [borrowSchedules])
-
-  const scheduleCards = useMemo(() => {
-    const scheduleList: BorrowSchedule[] = [...borrowSchedules]
-    const fulfilledRequestIds = new Set(
-      borrowSchedules
-        .map((schedule) => schedule.requestId)
-        .filter((value): value is string => Boolean(value)),
-    )
-
-    borrowRequests.forEach((request) => {
-      if (request.status !== "approved") {
-        return
-      }
-
-      if (request.id && fulfilledRequestIds.has(request.id)) {
-        return
-      }
-
-      const placeholderId = `request-${request.id}`
-      const startDate = request.preferredDate || ""
-      const endDate = request.returnDate || request.preferredDate || ""
-
-      scheduleList.push({
-        id: placeholderId,
-        requestId: request.id,
-        itemId: request.itemId,
-        itemTitle: request.itemTitle,
-        borrowerName: request.borrowerName,
-        borrowerId: request.borrowerId || null,
-        lenderName: request.lenderName,
-        lenderId: request.ownerId || null,
-        borrowerQRCode: `borrower-${slugify(request.borrowerName)}-${placeholderId}`,
-        lenderQRCode: `lender-${slugify(request.lenderName)}-${placeholderId}`,
-        startDate,
-        endDate,
-        meetingPlace: request.meetingPlace,
-        meetingTime: request.meetingTime,
-        status: "scheduled",
-        returnReady: false,
-      })
-    })
-
-    scheduleList.sort((a, b) => {
-      const aTime = new Date(a.startDate || 0).getTime()
-      const bTime = new Date(b.startDate || 0).getTime()
-      return bTime - aTime
-    })
-
-    return scheduleList
-  }, [borrowRequests, borrowSchedules])
-
-  useEffect(() => {
-    const userId = currentUser?.id
-    if (!userId) {
-      setBorrowSchedules([])
-      return
-    }
-
-    void fetchBorrowSchedules(userId)
-  }, [currentUser?.id, fetchBorrowSchedules])
-
-  useEffect(() => {
-    const userId = currentUser?.id
-    if (!userId) {
-      return
-    }
-
-    const handleChange = () => {
-      void fetchBorrowSchedules(userId)
-    }
-
-    const channel = supabase
-      .channel(`borrow-schedules-${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "borrow_schedules", filter: `borrower_id=eq.${userId}` },
-        handleChange,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "borrow_schedules", filter: `lender_id=eq.${userId}` },
-        handleChange,
-      )
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [currentUser?.id, fetchBorrowSchedules])
-
-  const [items, setItems] = useState<MarketplaceItem[]>([])
-  const [itemsLoading, setItemsLoading] = useState(true)
-  const [itemsError, setItemsError] = useState<string | null>(null)
-  const [deleteItemError, setDeleteItemError] = useState<string | null>(null)
-  const [deletingItemId, setDeletingItemId] = useState<string | null>(null)
-  const [uiBanner, setUiBanner] = useState<{ type: "success" | "error" | "info"; message: string } | null>(null)
-  const [pendingDeleteItem, setPendingDeleteItem] = useState<MarketplaceItem | null>(null)
-  const [isProcessingDelete, setIsProcessingDelete] = useState(false)
-  const [removingItemIds, setRemovingItemIds] = useState<Set<string>>(() => new Set<string>())
-  const removalAnimationMs = 320
-
-  const showBanner = useCallback((message: string, type: "success" | "error" | "info" = "info") => {
-    setUiBanner({ message, type })
-  }, [])
-
-  const openRatingModal = (context: RatingContextState) => {
-    setRatingContext(context)
-    setShowRatingModal(true)
-  }
-
-  const closeRatingModal = () => {
-    setShowRatingModal(false)
-    setRatingContext(null)
-  }
-
-  useEffect(() => {
-    if (!uiBanner) return
-    const timeout = window.setTimeout(() => {
-      setUiBanner(null)
-    }, 5000)
-    return () => {
-      window.clearTimeout(timeout)
-    }
-  }, [uiBanner])
-
-  const [listItemForm, setListItemForm] = useState<ListItemFormState>({
-    title: "",
-    category: "Electronics",
-    condition: "Like New",
-    description: "",
-    campus: "Main Campus",
-    quantity: 1,
-    deposit: false,
-    imageFile: null,
-  })
-  const [isSubmittingItem, setIsSubmittingItem] = useState(false)
-  const [listItemError, setListItemError] = useState<string | null>(null)
-  const [listItemSuccess, setListItemSuccess] = useState<string | null>(null)
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
-  const [editingItemId, setEditingItemId] = useState<string | null>(null)
-  const [listItemExistingImage, setListItemExistingImage] = useState<string | null>(null)
-
-  const resetListItemState = () => {
-    setListItemForm({
-      title: "",
-      category: "Electronics",
-      condition: "Like New",
-      description: "",
-      campus: "Main Campus",
-      quantity: 1,
-      deposit: false,
-      imageFile: null,
-    })
-    setImagePreviewUrl(null)
-    setEditingItemId(null)
-    setListItemExistingImage(null)
-  }
-
-  useEffect(() => {
-    if (!imagePreviewUrl || !imagePreviewUrl.startsWith("blob:")) return
-    return () => {
-      URL.revokeObjectURL(imagePreviewUrl)
-    }
-  }, [imagePreviewUrl])
-
-  const mapItemRecord = useCallback((record: any): MarketplaceItem => {
-    const safeNumber = (value: any, fallback: number) => {
-      const parsed = Number(value)
-      return Number.isFinite(parsed) ? parsed : fallback
-    }
-
-    const quantity = safeNumber(record?.quantity, 1)
-
-    return {
-      id: String(record?.id ?? record?.uuid ?? `item-${Date.now()}`),
-      title: record?.title ?? "Untitled Item",
-      category: record?.category ?? "Other",
-      condition: record?.condition ?? "Good",
-      image: record?.image_url ?? record?.image ?? null,
-      ownerId: record?.owner_id ? String(record.owner_id) : null,
-      lender: {
-        name: record?.lender_name ?? record?.owner_name ?? "Community Lender",
-        rating: safeNumber(record?.lender_rating, 0),
-        reviews: safeNumber(record?.lender_reviews, 0),
-        email: record?.lender_email ?? record?.owner_email ?? record?.email ?? null,
-      },
-      availability: record?.availability ?? (quantity > 0 ? "Available" : "Unavailable"),
-      deposit: Boolean(record?.deposit ?? record?.deposit_required ?? false),
-      campus: record?.campus ?? "Main Campus",
-      description: record?.description ?? "",
-      createdAt: record?.created_at ? new Date(record.created_at) : new Date(),
-      quantity,
-    }
-  }, [])
-
-  const mapBorrowRequestRecord = useCallback((record: any): BorrowRequest => {
-    const safeString = (value: any) => {
-      if (value === null || value === undefined) return ""
-      return String(value)
-    }
-
-    const safeNumber = (value: any) => {
-      const parsed = Number(value)
-      return Number.isFinite(parsed) ? parsed : 0
-    }
-
-    const safeOptionalNumber = (value: any) => {
-      if (value === null || value === undefined) return null
-      const parsed = Number(value)
-      return Number.isFinite(parsed) ? parsed : null
-    }
-
-    const safeOptionalString = (value: any) => {
-      if (value === null || value === undefined) return null
-      return String(value)
-    }
-
-    const normalizeTime = (value: any) => {
-      const raw = safeOptionalString(value)
-      if (!raw) return null
-      return raw.length > 5 ? raw.slice(0, 5) : raw
-    }
-
-    const safeDate = (value: any) => {
-      if (!value) return null
-      const date = new Date(value)
-      return Number.isNaN(date.getTime()) ? null : date
-    }
-
-    return {
-      id: safeString(record?.id ?? record?.uuid ?? `req-${Date.now()}`),
-      itemId: safeString(record?.item_id ?? record?.itemId ?? ""),
-      itemTitle: record?.item_title ?? record?.itemTitle ?? "Borrowed Item",
-      itemImage: record?.item_image ?? record?.itemImage ?? null,
-      borrowerName: record?.borrower_name ?? record?.borrowerName ?? "Borrower",
-      borrowerRating: safeNumber(record?.borrower_rating ?? record?.borrowerRating ?? 0),
-      borrowerId: safeString(record?.borrower_id ?? record?.borrowerId ?? ""),
-      borrowerEmail: record?.borrower_email ?? record?.borrowerEmail ?? "",
-      requestDate:
-        record?.created_at
-          ? new Date(record.created_at)
-          : record?.request_date
-            ? new Date(record.request_date)
-            : new Date(),
-      preferredDate: safeString(record?.preferred_date ?? record?.preferredDate ?? ""),
-      returnDate: safeOptionalString(record?.return_date ?? record?.returnDate ?? null),
-      meetingPlace: safeOptionalString(record?.meeting_place ?? record?.meetingPlace ?? null),
-      meetingTime: normalizeTime(record?.meeting_time ?? record?.meetingTime ?? null),
-      message: record?.message ?? record?.borrower_message ?? "",
-      status: (record?.status ?? "pending") as BorrowRequest["status"],
-      ownerId: record?.owner_id
-        ? safeString(record.owner_id)
-        : record?.lender_id
-          ? safeString(record.lender_id)
-          : null,
-      lenderName: record?.lender_name ?? record?.lenderName ?? "Lender",
-      lenderEmail: record?.lender_email ?? record?.lenderEmail ?? null,
-      decisionMessage: record?.decision_message ?? record?.decisionMessage ?? record?.response_message ?? null,
-      borrowerFeedbackRating: safeOptionalNumber(
-        record?.borrower_feedback_rating ?? record?.borrowerFeedbackRating ?? null,
-      ),
-      borrowerFeedbackMessage:
-        record?.borrower_feedback_message ?? record?.borrowerFeedbackMessage ?? record?.borrower_review ?? null,
-      borrowerFeedbackAt: safeDate(record?.borrower_feedback_at ?? record?.borrowerFeedbackAt ?? null),
-      lenderFeedbackRating: safeOptionalNumber(record?.lender_feedback_rating ?? record?.lenderFeedbackRating ?? null),
-      lenderFeedbackMessage:
-        record?.lender_feedback_message ?? record?.lenderFeedbackMessage ?? record?.lender_review ?? null,
-      lenderFeedbackAt: safeDate(record?.lender_feedback_at ?? record?.lenderFeedbackAt ?? null),
-    }
-  }, [])
-
-  const fetchBorrowRequests = useCallback(
-    async (userId: string) => {
-      if (!userId) {
-        setBorrowRequests([])
-        return
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from("borrow_requests")
-          .select("*")
-          .or(`borrower_id.eq.${userId},owner_id.eq.${userId}`)
-          .order("created_at", { ascending: false })
-
-        if (error) {
-          console.error("Failed to load borrow requests", error)
-          setBorrowRequests([])
-          return
-        }
-
-  const mapped = (data ?? []).map(mapBorrowRequestRecord)
-  mapped.sort((a, b) => b.requestDate.getTime() - a.requestDate.getTime())
-        setBorrowRequests(mapped)
-      } catch (err) {
-        console.error("Unexpected error while loading borrow requests", err)
-        setBorrowRequests([])
-      }
-    },
-    [mapBorrowRequestRecord],
-  )
-
-  const sendLenderEmailNotification = useCallback(
-    async (payload: {
-      email: string
-      itemTitle: string
-      borrowerName: string
-      preferredDate: string
-      returnDate?: string | null
-      meetingPlace?: string | null
-      meetingTime?: string | null
-      message: string
-    }) => {
-      if (!ENABLE_EMAIL_NOTIFICATIONS) {
-        return
-      }
-      try {
-        const { error } = await supabase.functions.invoke("send-lender-notification", {
-          body: payload,
-        })
-        if (error) {
-          throw error
-        }
-      } catch (error) {
-        console.error("Failed to send lender email notification", error)
-      }
-    },
-    [],
-  )
-
-  const sendBorrowerEmailNotification = useCallback(
-    async (payload: {
-      email: string
-      itemTitle: string
-      borrowerName: string
-      lenderName: string
-      preferredDate: string
-      returnDate?: string | null
-      meetingPlace?: string | null
-      meetingTime?: string | null
-      decisionMessage?: string | null
-      notificationType: "approval" | "rejection"
-    }) => {
-      if (!ENABLE_EMAIL_NOTIFICATIONS) {
-        return
-      }
-      try {
-        const { error } = await supabase.functions.invoke("send-lender-notification", {
-          body: {
-            email: payload.email,
-            itemTitle: payload.itemTitle,
-            borrowerName: payload.borrowerName,
-            lenderName: payload.lenderName,
-            preferredDate: payload.preferredDate,
-            returnDate: payload.returnDate ?? null,
-            meetingPlace: payload.meetingPlace ?? null,
-            meetingTime: payload.meetingTime ?? null,
-            decisionMessage: payload.decisionMessage ?? "",
-            notificationType: payload.notificationType,
-          },
-        })
-        if (error) {
-          throw error
-        }
-      } catch (error) {
-        console.error("Failed to send borrower email notification", error)
-      }
-    },
-    [],
-  )
-
-  const updateItemQuantity = useCallback(async (itemId: string, adjustment: number) => {
-    let nextQuantity: number | null = null
-    let nextAvailability: string | null = null
-
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== itemId) return item
-        const quantity = Math.max(0, (item.quantity ?? 0) + adjustment)
-        nextQuantity = quantity
-        const availability = quantity > 0 ? "Available" : "Unavailable"
-        nextAvailability = availability
-        return { ...item, quantity, availability }
-      }),
-    )
-
-    setSelectedItem((prev) => {
-      if (!prev || prev.id !== itemId || nextQuantity === null || nextAvailability === null) return prev
-      return { ...prev, quantity: nextQuantity, availability: nextAvailability }
-    })
-
-    if (nextQuantity === null || nextAvailability === null) {
-      return
-    }
-
-    try {
-      const numericId = Number(itemId)
-      const query = supabase
-        .from("items")
-        .update({
-          quantity: nextQuantity,
-          availability: nextAvailability,
-        })
-
-      const { data, error } = Number.isFinite(numericId)
-        ? await query.eq("id", numericId).select("id, quantity").maybeSingle()
-        : await query.eq("id", itemId).select("id, quantity").maybeSingle()
-
-      if (error) {
-        console.error("Failed to update item quantity", error)
-      } else if (!data) {
-        console.warn("Item quantity update did not match any row", { itemId, nextQuantity })
-      }
-    } catch (err) {
-      console.error("Unexpected error while updating item quantity", err)
-    }
-  }, [])
-
-  const fetchItems = useCallback(async () => {
-    setItemsLoading(true)
-    setItemsError(null)
-
-    try {
-      const { data, error } = await supabase.from("items").select("*")
-
-      if (error) {
-        console.error("Failed to load marketplace items", error)
-        setItems([])
-        setItemsError(error.message)
-        return
-      }
-
-      const mapped = (data ?? []).map(mapItemRecord)
-      mapped.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      setItems(mapped)
-    } catch (err) {
-      console.error("Unexpected error while loading marketplace items", err)
-      setItems([])
-      setItemsError(err instanceof Error ? err.message : "Unexpected error loading items")
-    } finally {
-      setItemsLoading(false)
-    }
-  }, [mapItemRecord])
-
-  useEffect(() => {
-    fetchItems()
-  }, [fetchItems])
-
-  useEffect(() => {
-    const userId = currentUser?.id
-    if (!userId) {
-      setBorrowRequests([])
-      return
-    }
-    void fetchBorrowRequests(userId)
-  }, [currentUser?.id, fetchBorrowRequests])
-
-  useEffect(() => {
-    const userId = currentUser?.id
-    if (!userId) {
-      return
-    }
-
-    const handleChange = (payload: any) => {
-      const eventType = payload?.eventType
-      if (eventType === "DELETE") {
-        const removedId = payload?.old?.id ?? payload?.old?.uuid
-        if (!removedId) return
-        setBorrowRequests((prev) => prev.filter((req) => req.id !== String(removedId)))
-        return
-      }
-
-      const record = payload?.new
-      if (!record) return
-      const mapped = mapBorrowRequestRecord(record)
-      setBorrowRequests((prev) => {
-        const existingIndex = prev.findIndex((req) => req.id === mapped.id)
-        if (existingIndex >= 0) {
-          const next = [...prev]
-          next[existingIndex] = mapped
-          next.sort((a, b) => b.requestDate.getTime() - a.requestDate.getTime())
-          return next
-        }
-        const next = [mapped, ...prev]
-        next.sort((a, b) => b.requestDate.getTime() - a.requestDate.getTime())
-        return next
-      })
-    }
-
-    const channel = supabase
-      .channel(`borrow-requests-${userId}`)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "borrow_requests", filter: `owner_id=eq.${userId}` },
-        handleChange,
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "borrow_requests", filter: `borrower_id=eq.${userId}` },
-        handleChange,
-      )
-      .subscribe()
-
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [currentUser?.id, mapBorrowRequestRecord])
 
   useEffect(() => {
     previousRequestIdsRef.current = new Set()
@@ -1179,165 +302,48 @@ export default function Home() {
   }, [currentUser?.id, filterCondition, items, searchQuery, selectedCategory, sortBy])
 
   const isEditingListing = Boolean(editingItemId)
-  const borrowerRequestsForCurrentUser = useMemo(() => {
-    if (!currentUser) return []
-    return borrowRequests
-      .filter((req) => req.borrowerId === currentUser.id)
-      .map((req) => {
-        const override = requestStageOverrides.get(req.id)
-        return override && override !== req.status ? { ...req, status: override } : req
-      })
-  }, [borrowRequests, currentUser, requestStageOverrides])
+  const borrowerRequestsForCurrentUser = useMemo(
+    () => getBorrowerRequestsForUser(borrowRequests, currentUser?.id ?? null, requestStageOverrides),
+    [borrowRequests, currentUser?.id, requestStageOverrides],
+  )
 
-  const activeBorrowRequestsByItem = useMemo(() => {
-    const map = new Map<string, BorrowRequest>()
-    borrowerRequestsForCurrentUser.forEach((req) => {
-      if (req.status === "pending" || req.status === "approved" || req.status === "ongoing") {
-        map.set(req.itemId, req)
-      }
-    })
-    return map
-  }, [borrowerRequestsForCurrentUser])
+  const activeBorrowRequestsByItem = useMemo(
+    () => buildActiveBorrowRequestsByItem(borrowerRequestsForCurrentUser),
+    [borrowerRequestsForCurrentUser],
+  )
 
-  const lenderRequestsForCurrentUser = useMemo(() => {
-    if (!currentUser) return []
-    return borrowRequests
-      .filter((req) => req.ownerId === currentUser.id)
-      .map((req) => {
-        const override = requestStageOverrides.get(req.id)
-        return override && override !== req.status ? { ...req, status: override } : req
-      })
-  }, [borrowRequests, currentUser, requestStageOverrides])
+  const lenderRequestsForCurrentUser = useMemo(
+    () => getLenderRequestsForUser(borrowRequests, currentUser?.id ?? null, requestStageOverrides),
+    [borrowRequests, currentUser?.id, requestStageOverrides],
+  )
 
   const pendingLenderRequests = useMemo(
-    () => lenderRequestsForCurrentUser.filter((req) => req.status === "pending").length,
+    () => countPendingRequests(lenderRequestsForCurrentUser),
     [lenderRequestsForCurrentUser],
   )
 
-  const dashboardMetrics = useMemo<Record<DashboardRole, DashboardMetricSummary>>(() => {
-    const formatAverage = (average: number | null) => (average === null ? null : Number(average.toFixed(2)))
+  const dashboardMetrics = useMemo(
+    () =>
+      buildDashboardMetrics({
+        borrowRequests,
+        borrowerRequests: borrowerRequestsForCurrentUser,
+        lenderRequests: lenderRequestsForCurrentUser,
+        currentUser,
+        ratingStats,
+      }),
+    [
+      borrowRequests,
+      borrowerRequestsForCurrentUser,
+      lenderRequestsForCurrentUser,
+      currentUser,
+      ratingStats,
+    ],
+  )
 
-    const baseMetrics: Record<DashboardRole, DashboardMetricSummary> = {
-      combined: {
-        pendingRequests: 0,
-        activeBorrowings: 0,
-        completedTransactions: 0,
-        rating: formatAverage(ratingStats.overallAverage),
-        totalReviews: ratingStats.totalCount,
-      },
-      lender: {
-        pendingRequests: 0,
-        activeBorrowings: 0,
-        completedTransactions: 0,
-        rating: formatAverage(ratingStats.asLender.average),
-        totalReviews: ratingStats.asLender.count,
-      },
-      borrower: {
-        pendingRequests: 0,
-        activeBorrowings: 0,
-        completedTransactions: 0,
-        rating: formatAverage(ratingStats.asBorrower.average),
-        totalReviews: ratingStats.asBorrower.count,
-      },
-    }
-
-    if (!currentUser) {
-      return baseMetrics
-    }
-
-    const normalize = (value?: string | null) => (value ? value.trim().toLowerCase() : "")
-
-    const nameTokens = new Set<string>()
-    const addName = (value?: string | null) => {
-      const normalized = normalize(value)
-      if (normalized) {
-        nameTokens.add(normalized)
-      }
-    }
-
-    addName(currentUser.name)
-    addName(currentUser.fullName)
-    addName(
-      currentUser.firstName && currentUser.lastName ? `${currentUser.firstName} ${currentUser.lastName}` : null,
-    )
-
-    const currentUserId = currentUser.id ? String(currentUser.id) : null
-    const matchesUser = (candidateId?: string | null, candidateName?: string | null) => {
-      if (currentUserId && candidateId && String(candidateId) === currentUserId) {
-        return true
-      }
-      const normalized = normalize(candidateName)
-      return normalized ? nameTokens.has(normalized) : false
-    }
-
-    const borrowerPending = borrowerRequestsForCurrentUser.filter((req) => req.status === "pending").length
-    const lenderPending = lenderRequestsForCurrentUser.filter((req) => req.status === "pending").length
-
-    baseMetrics.borrower.pendingRequests = borrowerPending
-    baseMetrics.lender.pendingRequests = lenderPending
-    baseMetrics.combined.pendingRequests = borrowerPending + lenderPending
-
-    let borrowerActive = 0
-    let lenderActive = 0
-    let borrowerCompleted = 0
-    let lenderCompleted = 0
-
-    borrowRequests.forEach((request) => {
-      const isBorrower = matchesUser(request.borrowerId, request.borrowerName)
-      const isLender = matchesUser(request.ownerId, request.lenderName)
-      if (!isBorrower && !isLender) return
-
-      if (request.status === "approved") {
-        if (isBorrower) borrowerActive += 1
-        if (isLender) lenderActive += 1
-      }
-
-      if (request.status === "completed") {
-        if (isBorrower) borrowerCompleted += 1
-        if (isLender) lenderCompleted += 1
-      }
-    })
-
-    baseMetrics.borrower.activeBorrowings = borrowerActive
-    baseMetrics.lender.activeBorrowings = lenderActive
-    baseMetrics.combined.activeBorrowings = borrowerActive + lenderActive
-
-    baseMetrics.borrower.completedTransactions = borrowerCompleted
-    baseMetrics.lender.completedTransactions = lenderCompleted
-    baseMetrics.combined.completedTransactions = borrowerCompleted + lenderCompleted
-
-    return baseMetrics
-  }, [
-  borrowRequests,
-    borrowerRequestsForCurrentUser,
-    lenderRequestsForCurrentUser,
-    currentUser,
-    ratingStats.asBorrower.average,
-    ratingStats.asBorrower.count,
-    ratingStats.asLender.average,
-    ratingStats.asLender.count,
-    ratingStats.overallAverage,
-    ratingStats.totalCount,
-  ])
-
-  const userItemCounts = useMemo(() => {
-    if (!currentUser?.id) {
-      return { lent: 0, borrowed: 0 }
-    }
-
-    const isCountableStatus = (status: BorrowRequest["status"]) =>
-      status === "approved" || status === "ongoing" || status === "completed"
-
-    const lent = borrowRequests.filter(
-      (request) => request.ownerId === currentUser.id && isCountableStatus(request.status),
-    ).length
-
-    const borrowed = borrowRequests.filter(
-      (request) => request.borrowerId === currentUser.id && isCountableStatus(request.status),
-    ).length
-
-    return { lent, borrowed }
-  }, [borrowRequests, currentUser?.id])
+  const userItemCounts = useMemo(
+    () => calculateUserItemCounts({ borrowRequests, currentUserId: currentUser?.id ?? null }),
+    [borrowRequests, currentUser?.id],
+  )
 
   useEffect(() => {
     setCurrentUser((prev: any) => {
@@ -1371,43 +377,15 @@ export default function Home() {
     [],
   )
 
-  const recentActivity = useMemo<ActivityEntry[]>(() => {
-    const activity: ActivityEntry[] = lenderRequestsForCurrentUser.map((req) => ({
-      id: `lender-${req.id}`,
-      type: "request",
-      title: `Request for ${req.itemTitle}`,
-      description: `${req.borrowerName} would like to borrow on ${req.preferredDate}`,
-      date: req.requestDate,
-      status: req.status.charAt(0).toUpperCase() + req.status.slice(1),
-    }))
-
-    borrowerRequestsForCurrentUser.forEach((req) => {
-      const statusLabel = req.status.charAt(0).toUpperCase() + req.status.slice(1)
-      const type: ActivityEntry["type"] =
-        req.status === "completed" ? "completion" : req.status === "approved" ? "approval" : "request"
-      activity.push({
-        id: `borrower-${req.id}`,
-        type,
-        title: `${statusLabel} · ${req.itemTitle}`,
-        description:
-          type === "request"
-            ? `Waiting for ${req.lenderName} to respond`
-            : type === "approval"
-              ? `${req.lenderName} approved your request`
-              : `${req.lenderName} marked the borrowing complete`,
-        date: req.requestDate,
-        status: statusLabel,
-      })
-    })
-
-    activity.sort((a, b) => b.date.getTime() - a.date.getTime())
-
-    if (activity.length === 0) {
-      return baseRecentActivity
-    }
-
-    return [...activity, ...baseRecentActivity].slice(0, 6)
-  }, [baseRecentActivity, borrowerRequestsForCurrentUser, lenderRequestsForCurrentUser])
+  const recentActivity = useMemo(
+    () =>
+      buildRecentActivity({
+        borrowerRequests: borrowerRequestsForCurrentUser,
+        lenderRequests: lenderRequestsForCurrentUser,
+        baseActivity: baseRecentActivity,
+      }),
+    [baseRecentActivity, borrowerRequestsForCurrentUser, lenderRequestsForCurrentUser],
+  )
 
   useEffect(() => {
     if (userMode !== "requests") return
@@ -1430,115 +408,17 @@ export default function Home() {
   }, [requestsView, userMode])
 
   const handleLogin = (user: AuthUser) => {
-    applyAuthenticatedUser(user)
+    authHandleLogin(user)
+    setShowSignInModal(false)
+    setShowRegisterModal(false)
     setUserMode("dashboard")
   }
 
   const handleLogout = () => {
-    supabase.auth.signOut().catch((err) => console.error("Failed to sign out", err))
-    setIsAuthenticated(false)
-    setCurrentUser(null)
+    authHandleLogout()
+    setShowSignInModal(false)
+    setShowRegisterModal(false)
     setUserMode("dashboard")
-  }
-
-  const handleItemClick = (item: MarketplaceItem) => {
-    setSelectedItem(item)
-    setShowItemDetail(true)
-  }
-
-  const handleDeleteItemRequest = (item: MarketplaceItem) => {
-    if (!currentUser || item.ownerId !== currentUser.id) {
-      showBanner("You can only delete listings you created.", "error")
-      return
-    }
-
-    setDeleteItemError(null)
-    setPendingDeleteItem(item)
-  }
-
-  const handleCancelDeleteItem = () => {
-    if (isProcessingDelete) {
-      return
-    }
-
-    setPendingDeleteItem(null)
-    setDeleteItemError(null)
-  }
-
-  const handleConfirmDeleteItem = async () => {
-    if (!pendingDeleteItem || !currentUser) {
-      setDeleteItemError("You can only delete listings you created.")
-      return
-    }
-
-    if (pendingDeleteItem.ownerId !== currentUser.id) {
-      setDeleteItemError("You can only delete listings you created.")
-      return
-    }
-
-    const item = pendingDeleteItem
-    setDeleteItemError(null)
-    setIsProcessingDelete(true)
-    setDeletingItemId(item.id)
-
-    try {
-      const numericId = Number(item.id)
-      const query = supabase.from("items").delete().eq("owner_id", currentUser.id)
-      const { error } = Number.isFinite(numericId)
-        ? await query.eq("id", numericId)
-        : await query.eq("id", item.id)
-
-      if (error) {
-        console.error("Failed to delete item", error)
-        setDeleteItemError(error.message ?? "Failed to delete listing. Please try again.")
-        return
-      }
-
-      setPendingDeleteItem(null)
-
-      setRemovingItemIds((prev) => {
-        const next = new Set(prev)
-        next.add(item.id)
-        return next
-      })
-
-      window.setTimeout(() => {
-        setItems((prev) => prev.filter((existing) => existing.id !== item.id))
-        setRemovingItemIds((prev) => {
-          const next = new Set(prev)
-          next.delete(item.id)
-          return next
-        })
-      }, removalAnimationMs)
-
-      let shouldCloseDetail = false
-      setSelectedItem((prev) => {
-        if (prev && prev.id === item.id) {
-          shouldCloseDetail = true
-          return null
-        }
-        return prev
-      })
-      if (shouldCloseDetail) {
-        setShowItemDetail(false)
-      }
-
-      if (editingItemId === item.id) {
-        resetListItemState()
-        setUserMode("browse")
-      }
-
-      setListItemSuccess(null)
-      showBanner(`Listing for "${item.title}" deleted.`, "success")
-    } catch (err) {
-      console.error("Unexpected error while deleting item", err)
-      setDeleteItemError(
-        err instanceof Error ? err.message : "Unexpected error occurred while deleting the listing.",
-      )
-    } finally {
-      setDeletingItemId((prev) => (prev === item.id ? null : prev))
-      setIsProcessingDelete(false)
-    }
   }
 
   const handleRequestBorrow = () => {
@@ -1849,7 +729,7 @@ export default function Home() {
         })
 
         if (currentUser?.id) {
-          void fetchBorrowSchedules(currentUser.id)
+          void refreshBorrowSchedules()
         }
 
         setBorrowRequests((prev) =>
@@ -1877,157 +757,6 @@ export default function Home() {
         showBanner("An unexpected error occurred while creating the schedule.", "error")
       }
     })()
-  }
-
-  const handleListItemSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    if (!currentUser) {
-      setListItemError("Please sign in to list an item.")
-      setListItemSuccess(null)
-      return
-    }
-
-    const trimmedTitle = listItemForm.title.trim()
-    if (!trimmedTitle) {
-      setListItemError("Item title is required.")
-      setListItemSuccess(null)
-      return
-    }
-
-    setListItemError(null)
-    setListItemSuccess(null)
-    setIsSubmittingItem(true)
-
-    const safeQuantity = Number.isFinite(Number(listItemForm.quantity)) && Number(listItemForm.quantity) > 0
-      ? Math.floor(Number(listItemForm.quantity))
-      : 1
-
-    try {
-      let finalImageUrl: string | null = listItemExistingImage
-      const isEditing = Boolean(editingItemId)
-
-      if (listItemForm.imageFile) {
-        const bucket = "item-images"
-        const file = listItemForm.imageFile
-        const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg"
-        const fileName = `${Date.now()}-${crypto.randomUUID()}.${fileExt}`
-        const filePath = `${currentUser.id}/${fileName}`
-
-        const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file, {
-          cacheControl: "3600",
-          upsert: false,
-          contentType: file.type || "image/jpeg",
-        })
-
-        if (uploadError) {
-          console.error("Failed to upload item image", uploadError)
-          setListItemError(uploadError.message)
-          return
-        }
-
-        const { data: publicUrlData } = supabase.storage.from(bucket).getPublicUrl(filePath)
-        finalImageUrl = publicUrlData.publicUrl
-      }
-
-      const commonPayload = {
-        title: trimmedTitle,
-        category: listItemForm.category,
-        condition: listItemForm.condition,
-        description: listItemForm.description.trim(),
-        campus: listItemForm.campus,
-        deposit_required: listItemForm.deposit,
-        image_url: finalImageUrl,
-        quantity: safeQuantity,
-      }
-
-      const query = supabase.from("items")
-
-      const { data, error } = isEditing
-        ? await query
-            .update({
-              ...commonPayload,
-              lender_name: currentUser.fullName || currentUser.name,
-              lender_rating: currentUser.rating ?? 0,
-              lender_reviews: currentUser.itemsLent ?? 0,
-              lender_email: currentUser.email ?? null,
-            })
-            .eq("id", editingItemId)
-            .eq("owner_id", currentUser.id)
-            .select()
-            .single()
-        : await query
-            .insert({
-              ...commonPayload,
-              availability: "Available",
-              lender_name: currentUser.fullName || currentUser.name,
-              lender_rating: currentUser.rating ?? 0,
-              lender_reviews: currentUser.itemsLent ?? 0,
-              owner_id: currentUser.id,
-              lender_email: currentUser.email ?? null,
-            })
-            .select()
-            .single()
-
-      if (error) {
-        console.error(isEditing ? "Failed to update item" : "Failed to list item", error)
-        setListItemError(error.message)
-        return
-      }
-
-      if (data) {
-        const mappedItem = mapItemRecord(data)
-        setItems((prev) =>
-          isEditing ? prev.map((item) => (item.id === mappedItem.id ? mappedItem : item)) : [mappedItem, ...prev],
-        )
-        if (selectedItem && selectedItem.id === mappedItem.id) {
-          setSelectedItem(mappedItem)
-        }
-        setListItemSuccess(isEditing ? "Item updated successfully!" : "Item listed successfully!")
-        resetListItemState()
-        if (userMode !== "browse") {
-          setUserMode("browse")
-        }
-      }
-    } catch (err) {
-      console.error("Unexpected error while saving item", err)
-      setListItemError(err instanceof Error ? err.message : "Unexpected error occurred while saving the item")
-    } finally {
-      setIsSubmittingItem(false)
-    }
-  }
-
-  const startEditingItem = (item: MarketplaceItem) => {
-    if (!currentUser || item.ownerId !== currentUser.id) {
-      setListItemError("You can only edit listings you created.")
-      setListItemSuccess(null)
-      return
-    }
-    setEditingItemId(item.id)
-    setListItemForm({
-      title: item.title,
-      category: item.category,
-      condition: item.condition,
-      description: item.description ?? "",
-      campus: item.campus,
-      quantity: Number.isFinite(item.quantity) && item.quantity > 0 ? item.quantity : 1,
-      deposit: Boolean(item.deposit),
-      imageFile: null,
-    })
-    setListItemExistingImage(item.image ?? null)
-    setImagePreviewUrl(item.image ?? null)
-    setListItemError(null)
-    setListItemSuccess(null)
-    setUserMode("lend")
-    setShowItemDetail(false)
-  }
-
-  const handleCancelEdit = () => {
-    resetListItemState()
-    setListItemError(null)
-    setListItemSuccess(null)
-    setShowItemDetail(false)
-    setUserMode("browse")
   }
 
   const handleGenerateQR = (schedule: BorrowSchedule, qrType: "borrower" | "lender") => {
@@ -2200,115 +929,6 @@ export default function Home() {
     })
   }
 
-  const handleSubmitRating = async (data: { rating: number; review: string }) => {
-    if (!ratingContext) {
-      return
-    }
-
-    const trimmedReview = data.review.trim()
-
-    if (ratingContext.requestId && ratingContext.direction) {
-      try {
-        const nowIso = new Date().toISOString()
-        const payload =
-          ratingContext.direction === "borrowerToLender"
-            ? {
-                borrower_feedback_rating: data.rating,
-                borrower_feedback_message: trimmedReview || null,
-                borrower_feedback_at: nowIso,
-              }
-            : {
-                lender_feedback_rating: data.rating,
-                lender_feedback_message: trimmedReview || null,
-                lender_feedback_at: nowIso,
-              }
-
-        const requestIdValue = Number.isFinite(Number(ratingContext.requestId))
-          ? Number(ratingContext.requestId)
-          : ratingContext.requestId
-
-        const { data: updatedRows, error } = await supabase
-          .from("borrow_requests")
-          .update(payload)
-          .eq("id", requestIdValue)
-          .select()
-          .limit(1)
-
-        if (error) {
-          console.error("Failed to submit rating", error)
-          showBanner("Failed to submit rating. Please try again.", "error")
-          return
-        }
-
-        const updated = updatedRows?.[0]
-
-        let effectiveRecord = updated
-
-        if (!effectiveRecord) {
-          const { data: fetchedRows, error: fetchError } = await supabase
-            .from("borrow_requests")
-            .select()
-            .eq("id", requestIdValue)
-            .limit(1)
-
-          if (fetchError) {
-            console.error("Failed to confirm rating update", fetchError)
-            showBanner("We couldn't update that request. Please refresh and try again.", "error")
-            return
-          }
-
-          effectiveRecord = fetchedRows?.[0]
-
-          if (!effectiveRecord) {
-            showBanner("We couldn't update that request. Please refresh and try again.", "error")
-            return
-          }
-        }
-
-        const mapped = mapBorrowRequestRecord(effectiveRecord)
-        setBorrowRequests((prev) => prev.map((req) => (req.id === mapped.id ? mapped : req)))
-
-        closeRatingModal()
-        showBanner("Rating submitted successfully!", "success")
-        return
-      } catch (err) {
-        console.error("Unexpected error while submitting rating", err)
-        showBanner("An unexpected error occurred while submitting the rating.", "error")
-        return
-      }
-    }
-
-    closeRatingModal()
-    showBanner("Rating submitted successfully!", "success")
-    }
-
-  const bannerStyles = {
-    success: {
-      border: "border-emerald-500/50",
-      background: "bg-emerald-50 dark:bg-emerald-950/30",
-      text: "text-emerald-700 dark:text-emerald-100",
-      button: "text-emerald-700 hover:text-emerald-900 dark:text-emerald-100 dark:hover:text-emerald-50",
-    },
-    error: {
-      border: "border-red-500/50",
-      background: "bg-red-50 dark:bg-red-950/30",
-      text: "text-red-700 dark:text-red-100",
-      button: "text-red-700 hover:text-red-900 dark:text-red-100 dark:hover:text-red-50",
-    },
-    info: {
-      border: "border-primary/40",
-      background: "bg-primary/5",
-      text: "text-primary",
-      button: "text-primary hover:text-primary/80",
-    },
-  } as const
-
-  const bannerIconMap = {
-    success: CheckCircle2,
-    error: AlertTriangle,
-    info: Info,
-  } as const
-
   const activeBannerStyles = uiBanner ? bannerStyles[uiBanner.type] : null
   const ActiveBannerIcon = uiBanner ? bannerIconMap[uiBanner.type] : null
 
@@ -2340,7 +960,7 @@ export default function Home() {
               size="sm"
               variant="ghost"
               className={`${activeBannerStyles.button} text-sm`}
-              onClick={() => setUiBanner(null)}
+              onClick={dismissBanner}
             >
               Dismiss
             </Button>
@@ -2348,24 +968,12 @@ export default function Home() {
         )}
 
         {!isAuthenticated ? (
-          <div className="text-center py-16">
-            <div className="mb-8">
-              <h1 className="text-5xl font-bold text-primary mb-4">Lend-A-Spartan</h1>
-              <p className="text-xl text-muted-foreground mb-8">Share and borrow items with your BatStateU community</p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button
-                size="lg"
-                onClick={() => { setShowSignInModal(true); }}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground"
-              >
-                Sign In
-              </Button>
-              <Button size="lg" variant="outline" onClick={() => setShowRegisterModal(true)}>
-                Register
-              </Button>
-            </div>
-          </div>
+          <LandingPage
+            onSignInClick={() => {
+              setShowSignInModal(true)
+            }}
+            onRegisterClick={() => setShowRegisterModal(true)}
+          />
         ) : (
           <>
             {lenderNotification && (
@@ -2383,319 +991,92 @@ export default function Home() {
               </div>
             )}
             {userMode === "dashboard" ? (
-              <Dashboard
+              <DashboardView
                 currentUser={currentUser}
                 metricsByRole={dashboardMetrics}
                 recentActivity={recentActivity}
                 onNavigate={setUserMode}
               />
             ) : userMode === "browse" ? (
-              <>
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold text-foreground mb-6">Browse Items</h2>
-                  <SearchFilters
-                    searchQuery={searchQuery}
-                    onSearchChange={setSearchQuery}
-                    selectedCategory={selectedCategory}
-                    onCategoryChange={setSelectedCategory}
-                    sortBy={sortBy}
-                    onSortChange={setSortBy}
-                    filterCondition={filterCondition}
-                    onConditionChange={setFilterCondition}
-                    showFilters={showFilters}
-                    onToggleFilters={() => setShowFilters(!showFilters)}
-                  />
-                </div>
-
-                {itemsError && <p className="text-sm text-red-600 mb-4">{itemsError}</p>}
-                {deleteItemError && !pendingDeleteItem && (
-                  <p className="text-sm text-red-600 mb-4">{deleteItemError}</p>
-                )}
-
-                <ItemsGrid
-                  items={filteredAndSortedItems}
-                  onItemClick={handleItemClick}
-                  isLoading={itemsLoading}
-                  currentUserId={currentUser?.id ?? null}
-                  deletingItemId={deletingItemId}
-                  onDeleteItem={handleDeleteItemRequest}
-                  removingItemIds={removingItemIds}
-                />
-              </>
+              <BrowseView
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                selectedCategory={selectedCategory}
+                onCategoryChange={setSelectedCategory}
+                sortBy={sortBy}
+                onSortChange={setSortBy}
+                filterCondition={filterCondition}
+                onConditionChange={setFilterCondition}
+                showFilters={showFilters}
+                onToggleFilters={() => setShowFilters((prev) => !prev)}
+                itemsError={itemsError}
+                deleteItemError={deleteItemError}
+                hasPendingDeleteItem={Boolean(pendingDeleteItem)}
+                items={filteredAndSortedItems}
+                onItemClick={handleItemClick}
+                isLoading={itemsLoading}
+                currentUserId={currentUser?.id ?? null}
+                deletingItemId={deletingItemId}
+                onDeleteItem={handleDeleteItemRequest}
+                removingItemIds={removingItemIds}
+              />
             ) : userMode === "requests" ? (
-              <>
-                <div className="mb-8 space-y-4">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <h2 className="text-3xl font-bold text-foreground flex items-center gap-2">
-                      <Inbox size={32} />
-                      Requests Center
-                    </h2>
-                    <div className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/30 p-1">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={requestsView === "borrower" ? "default" : "ghost"}
-                        className="text-sm"
-                        onClick={() => setRequestsView("borrower")}
-                      >
-                        As Borrower
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={requestsView === "lender" ? "default" : "ghost"}
-                        className="text-sm"
-                        onClick={() => setRequestsView("lender")}
-                      >
-                        As Lender
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {requestsView === "borrower"
-                      ? "Track the items you've asked to borrow and monitor their status."
-                      : "Review incoming requests for your listed items and respond quickly to keep things moving."}
-                  </p>
-                </div>
-                <RequestsDashboard
-                  requests={requestsView === "borrower" ? borrowerRequestsForCurrentUser : lenderRequestsForCurrentUser}
-                  currentUserRole={requestsView}
-                  onApprove={handleApproveRequest}
-                  onReject={handleRejectRequest}
-                  onComplete={handleCompleteRequest}
-                  onOpenRating={handleOpenRequestRating}
-                />
-              </>
+              <RequestsView
+                requestsView={requestsView}
+                onRequestsViewChange={setRequestsView}
+                borrowerRequests={borrowerRequestsForCurrentUser}
+                lenderRequests={lenderRequestsForCurrentUser}
+                onApprove={handleApproveRequest}
+                onReject={handleRejectRequest}
+                onComplete={handleCompleteRequest}
+                onOpenRating={handleOpenRequestRating}
+              />
             ) : userMode === "schedule" ? (
-              <>
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold text-foreground mb-6 flex items-center gap-2">
-                    <Calendar size={32} />
-                    Borrowing Schedule
-                  </h2>
-                </div>
-                <BorrowScheduleComponent
-                  schedules={scheduleCards}
-                  currentUserName={currentUser?.name || ""}
-                  onGenerateQR={handleGenerateQR}
-                  onScanQR={handleScanQR}
-                  forceAllActions
-                />
-              </>
+              <ScheduleView
+                schedules={scheduleCards}
+                currentUserName={currentUser?.name ?? ""}
+                onGenerateQR={handleGenerateQR}
+                onScanQR={handleScanQR}
+              />
             ) : userMode === "profile" ? (
-              <>
-                <div className="mb-8">
-                  <h2 className="text-3xl font-bold text-foreground mb-6 flex items-center gap-2">
-                    <User size={32} />
-                    My Profile
-                  </h2>
-                </div>
-                <UserProfile
-                  userName={currentUser.name}
-                  rating={ratingStats.overallAverage}
-                  totalReviews={ratingStats.totalCount}
-                  itemsLent={currentUser.itemsLent}
-                  itemsBorrowed={currentUser.itemsBorrowed}
-                  joinDate={currentUser.joinDate}
-                  reviews={receivedReviews}
-                  lenderRating={ratingStats.asLender.average}
-                  lenderReviewCount={ratingStats.asLender.count}
-                  borrowerRating={ratingStats.asBorrower.average}
-                  borrowerReviewCount={ratingStats.asBorrower.count}
-                />
-              </>
+              <ProfileView currentUser={currentUser} ratingStats={ratingStats} reviews={receivedReviews} />
             ) : (
-              <div className="max-w-2xl mx-auto">
-                <h2 className="text-3xl font-bold text-foreground mb-6">List an Item to Lend</h2>
-                <Card className="p-6 border border-border">
-                  <form className="space-y-4" onSubmit={handleListItemSubmit}>
-                    {isEditingListing && (
-                      <div className="flex flex-col gap-2 rounded-md border border-primary/40 bg-primary/5 px-4 py-3 text-sm text-primary">
-                        <div className="font-medium">You&apos;re editing an existing listing.</div>
-                        <div className="flex flex-wrap items-center justify-between gap-3 text-primary/80">
-                          <span>Adjust the item details and save to publish your changes.</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={handleCancelEdit}
-                            className="text-primary hover:text-primary"
-                          >
-                            Cancel edit
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                    {listItemError && <p className="text-sm text-red-600">{listItemError}</p>}
-                    {listItemSuccess && <p className="text-sm text-green-600">{listItemSuccess}</p>}
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Item Title</label>
-                      <Input
-                        value={listItemForm.title}
-                        onChange={(event) =>
-                          setListItemForm((prev) => ({ ...prev, title: event.target.value }))
-                        }
-                        placeholder="e.g., Laptop Stand"
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Category</label>
-                      <select
-                        className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                        value={listItemForm.category}
-                        onChange={(event) =>
-                          setListItemForm((prev) => ({ ...prev, category: event.target.value }))
-                        }
-                      >
-                        <option value="Electronics">Electronics</option>
-                        <option value="School Supplies">School Supplies</option>
-                        <option value="Laboratory">Laboratory</option>
-                        <option value="Books">Books</option>
-                        <option value="Sports">Sports</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Description</label>
-                      <textarea
-                        className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                        rows={4}
-                        placeholder="Describe the item condition and details..."
-                        value={listItemForm.description}
-                        onChange={(event) =>
-                          setListItemForm((prev) => ({ ...prev, description: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Quantity</label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={listItemForm.quantity}
-                          onChange={(event) =>
-                            setListItemForm((prev) => ({
-                              ...prev,
-                              quantity: Number.isFinite(Number(event.target.value))
-                                ? Math.max(1, Math.floor(Number(event.target.value)))
-                                : prev.quantity,
-                            }))
-                          }
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium mb-2">Condition</label>
-                        <select
-                          className="w-full px-3 py-2 border border-border rounded-md bg-background"
-                          value={listItemForm.condition}
-                          onChange={(event) =>
-                            setListItemForm((prev) => ({ ...prev, condition: event.target.value }))
-                          }
-                        >
-                          <option value="Like New">Like New</option>
-                          <option value="Good">Good</option>
-                          <option value="Fair">Fair</option>
-                        </select>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Campus / Location</label>
-                      <Input
-                        placeholder="e.g., Main Campus"
-                        value={listItemForm.campus}
-                        onChange={(event) =>
-                          setListItemForm((prev) => ({ ...prev, campus: event.target.value }))
-                        }
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Item Image (optional)</label>
-                      <Input
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) => {
-                          const file = event.target.files?.[0] ?? null
-                          setListItemForm((prev) => ({ ...prev, imageFile: file }))
-                          if (!file) {
-                            setImagePreviewUrl(isEditingListing ? listItemExistingImage : null)
-                            event.target.value = ""
-                            return
-                          }
-                          setImagePreviewUrl((prev) => {
-                            if (prev && prev.startsWith("blob:")) {
-                              URL.revokeObjectURL(prev)
-                            }
-                            return file ? URL.createObjectURL(file) : null
-                          })
-                          event.target.value = ""
-                        }}
-                      />
-                      {imagePreviewUrl && (
-                        <div className="mt-3">
-                          <p className="text-xs text-muted-foreground mb-1">Preview</p>
-                          <img
-                            src={imagePreviewUrl}
-                            alt="Selected item preview"
-                            className="w-full h-48 object-cover rounded border border-border"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        id="deposit"
-                        className="rounded"
-                        checked={listItemForm.deposit}
-                        onChange={(event) =>
-                          setListItemForm((prev) => ({ ...prev, deposit: event.target.checked }))
-                        }
-                      />
-                      <label htmlFor="deposit" className="text-sm">
-                        Require deposit for this item
-                      </label>
-                    </div>
-                    <Button
-                      type="submit"
-                      className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
-                      disabled={isSubmittingItem}
-                    >
-                      {isEditingListing ? <Save size={20} className="mr-2" /> : <Plus size={20} className="mr-2" />}
-                      {isSubmittingItem
-                        ? isEditingListing
-                          ? "Saving..."
-                          : "Listing..."
-                        : isEditingListing
-                          ? "Save Changes"
-                          : "List Item"}
-                    </Button>
-                  </form>
-                </Card>
-              </div>
+              <LendView
+                listItemError={listItemError}
+                listItemSuccess={listItemSuccess}
+                isEditingListing={isEditingListing}
+                onCancelEdit={handleCancelEdit}
+                onSubmit={handleListItemSubmit}
+                listItemForm={listItemForm}
+                setListItemForm={setListItemForm}
+                imagePreviewUrl={imagePreviewUrl}
+                setImagePreviewUrl={setImagePreviewUrl}
+                listItemExistingImage={listItemExistingImage}
+                isSubmittingItem={isSubmittingItem}
+              />
             )}
           </>
         )}
       </main>
 
-      <SignInModal
-        isOpen={showSignInModal}
-        onClose={() => setShowSignInModal(false)}
-        onLogin={handleLogin}
-        onSwitchToRegister={() => {
-          setShowSignInModal(false)
-          setShowRegisterModal(true)
+      <AuthModals
+        signIn={{
+          isOpen: showSignInModal,
+          onClose: () => setShowSignInModal(false),
+          onLogin: handleLogin,
+          onSwitchToRegister: () => {
+            setShowSignInModal(false)
+            setShowRegisterModal(true)
+          },
         }}
-      />
-
-      <RegisterModal
-        isOpen={showRegisterModal}
-        onClose={() => setShowRegisterModal(false)}
-        onRegister={handleLogin}
-        onSwitchToSignIn={() => {
-          setShowRegisterModal(false)
-          setShowSignInModal(true)
+        register={{
+          isOpen: showRegisterModal,
+          onClose: () => setShowRegisterModal(false),
+          onRegister: handleLogin,
+          onSwitchToSignIn: () => {
+            setShowRegisterModal(false)
+            setShowSignInModal(true)
+          },
         }}
       />
 
