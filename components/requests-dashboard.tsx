@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -8,6 +8,20 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CheckCircle, XCircle, Clock, MessageSquare, User, X, Star } from "lucide-react"
 
 type TabValue = "toRate" | "pending" | "approved" | "ongoing" | "completed" | "rejected"
+
+const REQUESTS_TAB_STORAGE_PREFIX = "las:requestsTab:"
+const ALLOWED_REQUEST_TABS: TabValue[] = ["toRate", "pending", "approved", "ongoing", "completed", "rejected"]
+
+const getRequestsTabStorageKey = (role: "borrower" | "lender") => `${REQUESTS_TAB_STORAGE_PREFIX}${role}`
+
+const readStoredRequestsTab = (role: "borrower" | "lender"): TabValue | null => {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  const stored = window.localStorage.getItem(getRequestsTabStorageKey(role)) as TabValue | null
+  return stored && ALLOWED_REQUEST_TABS.includes(stored) ? stored : null
+}
 
 interface BorrowRequest {
   id: string
@@ -119,14 +133,40 @@ export default function RequestsDashboard({
   const completedRequests = requests.filter((r) => r.status === "completed")
   const rejectedRequests = requests.filter((r) => r.status === "rejected")
 
-  const [activeTab, setActiveTab] = useState<TabValue>(() => {
+  const computeFallbackTab = useCallback((): TabValue => {
     if (toRateRequests.length > 0) return "toRate"
     if (pendingRequests.length > 0) return "pending"
     if (approvedRequests.length > 0) return "approved"
     if (ongoingRequests.length > 0) return "ongoing"
     if (completedRequests.length > 0) return "completed"
     return "rejected"
+  }, [
+    toRateRequests.length,
+    pendingRequests.length,
+    approvedRequests.length,
+    ongoingRequests.length,
+    completedRequests.length,
+  ])
+
+  const [activeTab, setActiveTab] = useState<TabValue>(() => {
+    const stored = readStoredRequestsTab(currentUserRole)
+    return stored ?? computeFallbackTab()
   })
+
+  useEffect(() => {
+    const stored = readStoredRequestsTab(currentUserRole)
+    if (stored) {
+      setActiveTab((prev) => (prev === stored ? prev : stored))
+      return
+    }
+    const fallback = computeFallbackTab()
+    setActiveTab((prev) => (prev === fallback ? prev : fallback))
+  }, [currentUserRole, computeFallbackTab])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(getRequestsTabStorageKey(currentUserRole), activeTab)
+  }, [activeTab, currentUserRole])
 
   const renderStars = (value: number) => (
     <div className="flex gap-1 text-accent">

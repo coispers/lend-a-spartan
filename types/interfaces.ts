@@ -1,5 +1,9 @@
 export interface BorrowRequest {
   id: string
+  idSource?: "id" | "uuid" | "request_id" | "generated"
+  rawId?: string | number | null
+  rawUuid?: string | null
+  rawRequestId?: string | number | null
   itemId: string
   itemTitle: string
   itemImage: string | null
@@ -112,6 +116,12 @@ export interface RatingContextState {
   targetUserName: string
   targetUserId?: string | null
   requestId?: string
+  requestIdSource?: BorrowRequest["idSource"]
+  originalKeys?: {
+    id?: string | number | null
+    uuid?: string | null
+    request_id?: string | number | null
+  }
   direction?: RatingDirection
   existingRating?: number | null
   existingReview?: string | null

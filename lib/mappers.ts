@@ -119,8 +119,31 @@ export const mapBorrowRequestRecord = (record: any): BorrowRequest => {
     return Number.isNaN(date.getTime()) ? null : date
   }
 
+  const rawId = record?.id ?? null
+  const rawRequestId = record?.request_id ?? null
+  const rawUuid = record?.uuid ?? null
+
+  let idSource: BorrowRequest["idSource"] = "generated"
+  let resolvedId: string
+  if (rawId !== null && rawId !== undefined && String(rawId) !== "") {
+    idSource = "id"
+    resolvedId = safeString(rawId)
+  } else if (rawRequestId !== null && rawRequestId !== undefined && String(rawRequestId) !== "") {
+    idSource = "request_id"
+    resolvedId = safeString(rawRequestId)
+  } else if (rawUuid !== null && rawUuid !== undefined && String(rawUuid) !== "") {
+    idSource = "uuid"
+    resolvedId = safeString(rawUuid)
+  } else {
+    resolvedId = safeString(record?.id ?? record?.uuid ?? `req-${Date.now()}`)
+  }
+
   return {
-    id: safeString(record?.id ?? record?.uuid ?? `req-${Date.now()}`),
+    id: resolvedId,
+    idSource,
+    rawId,
+    rawUuid,
+    rawRequestId,
     itemId: safeString(record?.item_id ?? record?.itemId ?? ""),
     itemTitle: record?.item_title ?? record?.itemTitle ?? "Borrowed Item",
     itemImage: record?.item_image ?? record?.itemImage ?? null,

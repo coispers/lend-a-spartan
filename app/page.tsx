@@ -55,6 +55,28 @@ import type {
   UserReview,
 } from "@/types/interfaces"
 
+const USER_MODE_STORAGE_KEY = "las:userMode"
+const REQUESTS_VIEW_STORAGE_KEY = "las:requestsView"
+
+const resolveStoredUserMode = () => {
+  if (typeof window === "undefined") {
+    return "dashboard" as UserMode
+  }
+
+  const stored = window.localStorage.getItem(USER_MODE_STORAGE_KEY)
+  const allowedModes: UserMode[] = ["dashboard", "browse", "lend", "requests", "schedule", "profile"]
+  return stored && allowedModes.includes(stored as UserMode) ? (stored as UserMode) : ("dashboard" as UserMode)
+}
+
+const resolveStoredRequestsView = (): "borrower" | "lender" | null => {
+  if (typeof window === "undefined") {
+    return null
+  }
+
+  const stored = window.localStorage.getItem(REQUESTS_VIEW_STORAGE_KEY)
+  return stored === "borrower" || stored === "lender" ? stored : null
+}
+
 export default function Home() {
   const {
     isAuthenticated,
@@ -66,7 +88,7 @@ export default function Home() {
   const [showRequestModal, setShowRequestModal] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedCategory, setSelectedCategory] = useState("all")
-  const [userMode, setUserMode] = useState<UserMode>("dashboard")
+  const [userMode, setUserMode] = useState<UserMode>(resolveStoredUserMode)
   const [sortBy, setSortBy] = useState("newest")
   const [filterCondition, setFilterCondition] = useState("all")
   const [showFilters, setShowFilters] = useState(false)
@@ -80,10 +102,21 @@ export default function Home() {
   const [scannerError, setScannerError] = useState<string | null>(null)
   const [showSignInModal, setShowSignInModal] = useState(false)
   const [showRegisterModal, setShowRegisterModal] = useState(false)
-  const [requestsView, setRequestsView] = useState<"borrower" | "lender">("borrower")
+  const storedRequestsViewRef = useRef<"borrower" | "lender" | null>(null)
+  const [requestsView, setRequestsView] = useState<"borrower" | "lender">(() => {
+    const stored = resolveStoredRequestsView()
+    storedRequestsViewRef.current = stored
+    return stored ?? "borrower"
+  })
+  const autoSelectedRequestsViewRef = useRef(false)
   const [requestError, setRequestError] = useState<string | null>(null)
   const [lenderNotification, setLenderNotification] = useState<string | null>(null)
   const { uiBanner, showBanner, dismissBanner } = useDashboardBanner()
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    window.localStorage.setItem(USER_MODE_STORAGE_KEY, userMode)
+  }, [userMode])
 
   const {
     items,
@@ -388,7 +421,25 @@ export default function Home() {
   )
 
   useEffect(() => {
-    if (userMode !== "requests") return
+    if (storedRequestsViewRef.current === null && !autoSelectedRequestsViewRef.current) {
+      return
+    }
+    if (typeof window === "undefined") return
+    storedRequestsViewRef.current = requestsView
+    window.localStorage.setItem(REQUESTS_VIEW_STORAGE_KEY, requestsView)
+  }, [requestsView])
+
+  useEffect(() => {
+    if (userMode !== "requests") {
+      autoSelectedRequestsViewRef.current = false
+      return
+    }
+    if (storedRequestsViewRef.current) {
+      autoSelectedRequestsViewRef.current = true
+      return
+    }
+    if (autoSelectedRequestsViewRef.current) return
+    autoSelectedRequestsViewRef.current = true
     setRequestsView((prev) => {
       if (prev === "lender" && lenderRequestsForCurrentUser.length > 0) return prev
       if (prev === "borrower" && borrowerRequestsForCurrentUser.length > 0) return prev
@@ -856,6 +907,12 @@ export default function Home() {
       showBanner(`Item return confirmed. Transaction completed with ${selectedSchedule.borrowerName}.`, "success")
       openRatingModal({
         requestId: matchedRequest?.id,
+        requestIdSource: matchedRequest?.idSource,
+        originalKeys: {
+          id: matchedRequest?.rawId ?? null,
+          uuid: matchedRequest?.rawUuid ?? null,
+          request_id: matchedRequest?.rawRequestId ?? null,
+        },
         targetUserId: matchedRequest?.borrowerId ?? null,
         targetUserName: selectedSchedule.borrowerName,
         itemTitle: selectedSchedule.itemTitle,
@@ -902,6 +959,12 @@ export default function Home() {
       }
       openRatingModal({
         requestId: matchingRequest?.id,
+        requestIdSource: matchingRequest?.idSource,
+        originalKeys: {
+          id: matchingRequest?.rawId ?? null,
+          uuid: matchingRequest?.rawUuid ?? null,
+          request_id: matchingRequest?.rawRequestId ?? null,
+        },
         targetUserId: matchingRequest?.borrowerId ?? null,
         targetUserName: completedSchedule.borrowerName,
         itemTitle: completedSchedule.itemTitle,
@@ -916,6 +979,12 @@ export default function Home() {
     const direction: RatingDirection = role === "borrower" ? "borrowerToLender" : "lenderToBorrower"
     openRatingModal({
       requestId: request.id,
+      requestIdSource: request.idSource,
+      originalKeys: {
+        id: request.rawId ?? null,
+        uuid: request.rawUuid ?? null,
+        request_id: request.rawRequestId ?? null,
+      },
       targetUserId: role === "borrower" ? request.ownerId : request.borrowerId,
       targetUserName: role === "borrower" ? request.lenderName : request.borrowerName,
       itemTitle: request.itemTitle,
