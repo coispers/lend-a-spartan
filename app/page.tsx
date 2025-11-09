@@ -642,10 +642,6 @@ export default function Home() {
         return false
       }
 
-      if (status === "ongoing") {
-        return true
-      }
-
       const requestIdValue = Number.isFinite(Number(requestId)) ? Number(requestId) : requestId
 
       try {
